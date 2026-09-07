@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Charger calibration logs (may contain site-specific data)
+tools/*.csv
+*.csv

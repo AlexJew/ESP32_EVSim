@@ -1,0 +1,4 @@
+- [EVSim TB overview](evsim-tb-overview.md) — ESP32 fakes an EV to a MENNEKES AMTRON, relays a power setpoint to an inverter.
+- [Pilot state control](evsim-pilot-state-control.md) — two MOSFETs switch 2k7/1k2 on CP for states A/B/C, commanded over MQTT.
+- [Fronius GEN24 inverter](evsim-inverter-fronius.md) — the load-side device; may need an MQTT→Modbus bridge.
+- [evsim.gonium.net](evsim-reference-gonium.md) — process reference, CP duty→current formulas, PP resistor table.

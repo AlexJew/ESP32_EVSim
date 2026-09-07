@@ -154,8 +154,13 @@ the last good setpoint; that decision does not belong in the reader.
 `tools/charger_poll.py --sweep 6,8,10,13,16` at the same time, then compare measured duty
 against the charger's signalled current. At 10 A the expected duty is 16.67 %.
 
-## Open question
+## Resolved: GPIO34 is not available
 
-The schematic shows a stub near GPIO34 (`VDET_1`). If GPIO34 shares the divider net with
-GPIO35, it would allow simultaneous digital timing on one pin and ADC sampling on the
-other. The design does not depend on this — ADC sampling falls back to GPIO35 itself.
+GPIO34 (`VDET_1`) appears as a stub in the schematic but **was not connected on the
+fabricated PCB**. ADC sampling therefore happens on GPIO35 itself, alongside the digital
+edge timing on the same pin. `analogRead()` on GPIO35 gives a raw count reported in the
+`adc_raw` column, which is enough to confirm the state C level margin on the bench.
+
+Sampling the ADC on the same pin the ISR watches is safe here: `analogRead()` does not
+change the pin's digital function, and it is called once per 200 ms window rather than
+inside the ISR.

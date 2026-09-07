@@ -18,6 +18,20 @@ current protoboard and on the PCB being fabricated, so firmware does not need to
 state C is the 1k2 in parallel with the 2k7, not a replacement for it. Firmware must enforce
 A -> B -> C ordering and never drive C alone.
 
+**GPIO34 is NOT usable** - it appears as a `VDET_1` stub in the schematic but was left
+unconnected on the fabricated PCB. Anything needing the CP level (including ADC sampling)
+must use GPIO35.
+
+Front end between CP and GPIO35 (schematic rev 1.0): `D1` 1N4007 in series strips the
+negative half, `R5` 47k / `R6` 56k divides, and `D2` BZV55B3V3 clamps the peak. GPIO35
+therefore sees a 0 V to ~3 V square wave with the CP duty cycle preserved - readable as a
+**digital** signal, no ADC needed for the timing.
+
+**Tightest margin in the design:** in state C (CP +6 V) the divider gives ~2.9 V and D2
+does *not* clamp, against an ESP32 input-high threshold of ~2.48 V. States A and B are
+clamped and comfortable. Since state C is where all real measurements happen, verify this
+on the bench - the firmware reports `adc_raw` for exactly this purpose.
+
 Notes:
 - **GPIO35 is input-only** on the ESP32 and has no internal pull-up/pull-down - fine for reading, but it
   cannot be repurposed as an output.

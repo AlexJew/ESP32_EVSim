@@ -3,6 +3,7 @@
 - [AMTRON live telemetry](evsim-amtron-live-telemetry.md) — /json/dashboard.json gives CP state + signaled current, the PWM ground truth.
 - [AMTRON interfaces](evsim-amtron-interfaces.md) — webconfig inventory: REST, Modbus TCP, SEMP, EEBus, OCPP, DLM.
 - [Open questions](evsim-open-questions.md) — no-load current oscillation is EXPECTED; REST→CP path confirmed 1:1; EEBus HEMS on the LAN.
+- [ESP32 pinout](evsim-esp32-pinout.md) — GPIO35 reads CP PWM; GPIO33 = state B, GPIO32 = state C, B-before-C interlock.
 - [Pilot state control](evsim-pilot-state-control.md) — two MOSFETs switch 2k7/1k2 on CP for states A/B/C, commanded over MQTT.
 - [Fronius GEN24 inverter](evsim-inverter-fronius.md) — the load-side device; may need an MQTT→Modbus bridge.
 - [evsim.gonium.net](evsim-reference-gonium.md) — process reference, CP duty→current formulas, PP resistor table.

@@ -1,5 +1,8 @@
 - [EVSim TB overview](evsim-tb-overview.md) — ESP32 fakes an EV to a MENNEKES AMTRON, relays a power setpoint to an inverter.
-- [AMTRON interfaces](evsim-amtron-interfaces.md) — REST on without UID, HTTPS off; Modbus/SEMP/EEBus/OCPP also available.
+- [AMTRON REST API](evsim-amtron-rest-api.md) — working recipe: Authorization token, POST /json/settings.json, OperatorCurrentLimit_vehicleif.
+- [AMTRON live telemetry](evsim-amtron-live-telemetry.md) — /json/dashboard.json gives CP state + signaled current, the PWM ground truth.
+- [AMTRON interfaces](evsim-amtron-interfaces.md) — webconfig inventory: REST, Modbus TCP, SEMP, EEBus, OCPP, DLM.
+- [Open questions](evsim-open-questions.md) — no-load current oscillation is EXPECTED; REST→CP path confirmed 1:1; EEBus HEMS on the LAN.
 - [Pilot state control](evsim-pilot-state-control.md) — two MOSFETs switch 2k7/1k2 on CP for states A/B/C, commanded over MQTT.
 - [Fronius GEN24 inverter](evsim-inverter-fronius.md) — the load-side device; may need an MQTT→Modbus bridge.
 - [evsim.gonium.net](evsim-reference-gonium.md) — process reference, CP duty→current formulas, PP resistor table.

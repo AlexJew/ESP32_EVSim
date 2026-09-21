@@ -48,3 +48,49 @@ int pilot_plan(PilotState from, PilotState to, PilotWrite out[kPilotMaxWrites]) 
   }
   return n;
 }
+
+namespace {
+
+bool is_blank(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+}  // namespace
+
+bool pilot_parse_command(const char *line, PilotState *out) {
+  if (line == nullptr || out == nullptr) {
+    return false;
+  }
+
+  while (is_blank(*line)) {
+    line++;
+  }
+  const char letter = *line;
+  if (letter == '\0') {
+    return false;
+  }
+  line++;
+
+  while (is_blank(*line)) {
+    line++;
+  }
+  if (*line != '\0') {
+    return false;  // a second letter or stray characters: not a command
+  }
+
+  switch (letter) {
+    case 'A':
+    case 'a':
+      *out = PilotState::A;
+      return true;
+    case 'B':
+    case 'b':
+      *out = PilotState::B;
+      return true;
+    case 'C':
+    case 'c':
+      *out = PilotState::C;
+      return true;
+  }
+  return false;
+}

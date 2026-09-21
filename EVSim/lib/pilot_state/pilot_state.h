@@ -49,3 +49,9 @@ constexpr int kPilotMaxWrites = 2;
 // briefly: going up sets B then C, going down clears C then B. Returns the
 // number of writes placed in `out` (0 when the state does not change).
 int pilot_plan(PilotState from, PilotState to, PilotWrite out[kPilotMaxWrites]);
+
+// Parses a serial command line: exactly one letter A, B or C (either case),
+// optionally surrounded by spaces, tabs or line endings. Returns false and
+// leaves *out untouched for anything else, including a null pointer, an empty
+// or blank line, or more than one letter.
+bool pilot_parse_command(const char *line, PilotState *out);

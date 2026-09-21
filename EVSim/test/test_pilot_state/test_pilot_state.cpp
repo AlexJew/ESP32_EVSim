@@ -148,6 +148,51 @@ void test_plan_touches_only_the_pin_that_changes(void) {
   TEST_ASSERT_FALSE(writes[0].high);
 }
 
+// --- command parsing -------------------------------------------------------
+
+void test_parse_accepts_a_b_c_in_either_case(void) {
+  PilotState s = PilotState::A;
+  TEST_ASSERT_TRUE(pilot_parse_command("A", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::A, (int)s);
+  TEST_ASSERT_TRUE(pilot_parse_command("b", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::B, (int)s);
+  TEST_ASSERT_TRUE(pilot_parse_command("C", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::C, (int)s);
+  TEST_ASSERT_TRUE(pilot_parse_command("a", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::A, (int)s);
+}
+
+void test_parse_ignores_surrounding_whitespace_and_line_endings(void) {
+  PilotState s = PilotState::A;
+  TEST_ASSERT_TRUE(pilot_parse_command(" c\r\n", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::C, (int)s);
+  TEST_ASSERT_TRUE(pilot_parse_command("\tB  ", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::B, (int)s);
+}
+
+void test_parse_rejects_anything_else(void) {
+  PilotState s = PilotState::A;
+  TEST_ASSERT_FALSE(pilot_parse_command("x", &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("1", &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("", &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("   ", &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("AB", &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("A B", &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", &s));
+}
+
+void test_parse_leaves_the_output_untouched_on_rejection(void) {
+  PilotState s = PilotState::B;
+  TEST_ASSERT_FALSE(pilot_parse_command("x", &s));
+  TEST_ASSERT_EQUAL_INT((int)PilotState::B, (int)s);
+}
+
+void test_parse_rejects_null_pointers(void) {
+  PilotState s = PilotState::A;
+  TEST_ASSERT_FALSE(pilot_parse_command(nullptr, &s));
+  TEST_ASSERT_FALSE(pilot_parse_command("A", nullptr));
+}
+
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -166,5 +211,10 @@ int main(int, char **) {
   RUN_TEST(test_plan_going_up_sets_b_before_c);
   RUN_TEST(test_plan_going_down_clears_c_before_b);
   RUN_TEST(test_plan_touches_only_the_pin_that_changes);
+  RUN_TEST(test_parse_accepts_a_b_c_in_either_case);
+  RUN_TEST(test_parse_ignores_surrounding_whitespace_and_line_endings);
+  RUN_TEST(test_parse_rejects_anything_else);
+  RUN_TEST(test_parse_leaves_the_output_untouched_on_rejection);
+  RUN_TEST(test_parse_rejects_null_pointers);
   return UNITY_END();
 }

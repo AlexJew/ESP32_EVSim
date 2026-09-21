@@ -75,11 +75,14 @@ void handle_command(const char *line) {
 // Collects serial bytes into lines and hands each complete line to
 // handle_command(). Either CR or LF ends a line, so CRLF terminals work; the
 // empty line that CRLF produces is ignored. An overlong line is discarded.
+// At most one line is handled per call (the rest stay in the RX buffer for the
+// next loop pass), so a burst of commands cannot delay the CP sampling.
 void poll_serial() {
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
 
     if (c == '\n' || c == '\r') {
+      const bool handled = g_line_overflow || g_line_len > 0;
       if (g_line_overflow) {
         Serial.println("# unknown command (line too long)");
       } else if (g_line_len > 0) {
@@ -88,7 +91,10 @@ void poll_serial() {
       }
       g_line_len = 0;
       g_line_overflow = false;
-      continue;
+      if (handled) {
+        return;
+      }
+      continue;  // empty line (e.g. the LF of CRLF): nothing dispatched
     }
 
     if (g_line_len < kLineMax - 1) {
@@ -102,12 +108,15 @@ void poll_serial() {
 }  // namespace
 
 void setup() {
+  // First, so state A is driven by outputs rather than resting on the R8/R9
+  // pulldowns during the USB-CDC wait below.
+  pilot_driver_begin();
+
   Serial.begin(115200);
   while (!Serial && millis() < 2000) {
     ;  // brief grace period for USB CDC, but never block a headless boot
   }
 
-  pilot_driver_begin();
   cp_reader_begin();
 
   Serial.println();

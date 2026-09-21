@@ -114,6 +114,7 @@ Line-based at 115200 baud. Send `A`, `B` or `C` followed by a newline. Every rep
 | Refused | `# refused A -> C: state B must be asserted first` |
 | No-op | `# already in C` |
 | Unrecognised | `# unknown command 'x'` |
+| Overlong line | `# unknown command (line too long)` |
 | Boot | `# pilot state A`, printed with the existing banner |
 
 The banner comment is updated to say the firmware drives the pilot states and is no longer

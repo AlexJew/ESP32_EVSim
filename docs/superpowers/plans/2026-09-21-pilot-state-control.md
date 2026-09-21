@@ -842,7 +842,7 @@ Flash with `~/.platformio/penv/bin/pio run -e esp32dev -t upload`, open the seri
 | # | Send | Expect on the ESP32 | Expect on the charger (`Type2StateConnector1_vehicleif`) |
 |---|---|---|---|
 | 1 | (reset) | `# pilot state A`, CP reads `DC_12V`, `commanded` = A | no vehicle |
-| 2 | `B` | `# state A -> B`, valid PWM appears on GPIO35 | `(B)` vehicle connected |
+| 2 | `B` | `# state A -> B`, valid PWM appears on GPIO35 | `(B)` vehicle connected (also verifies the GPIO33 = state B binding: a swap would put the 1k2 alone on CP) |
 | 3 | `C` | `# state B -> C`, `adc_raw` reflects the ~2.9 V state C level | `(C)` vehicle connected ready |
 | 4 | `A` | `# state C -> A`, both pins drop | no vehicle |
 | 5 | `C` | `# refused A -> C: state B must be asserted first`, no change | unchanged |

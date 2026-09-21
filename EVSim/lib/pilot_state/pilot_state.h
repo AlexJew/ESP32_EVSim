@@ -32,3 +32,20 @@ PilotPins pilot_pins(PilotState state);
 
 // Stable short name for logging: "A", "B" or "C".
 const char *pilot_state_name(PilotState state);
+
+// One gate to drive. B is GPIO33 (Q1, 2k7); C is GPIO32 (Q2, 1k2).
+enum class PilotPin { B, C };
+
+struct PilotWrite {
+  PilotPin pin;
+  bool high;
+};
+
+// The most writes any transition needs.
+constexpr int kPilotMaxWrites = 2;
+
+// The ordered writes that take the board from `from` to `to`, touching only the
+// pins whose level changes. The order never leaves C high while B is low, even
+// briefly: going up sets B then C, going down clears C then B. Returns the
+// number of writes placed in `out` (0 when the state does not change).
+int pilot_plan(PilotState from, PilotState to, PilotWrite out[kPilotMaxWrites]);

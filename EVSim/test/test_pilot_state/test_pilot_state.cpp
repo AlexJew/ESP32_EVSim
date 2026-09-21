@@ -75,6 +75,79 @@ void test_state_names(void) {
   TEST_ASSERT_EQUAL_STRING("C", pilot_state_name(PilotState::C));
 }
 
+// --- write plan ------------------------------------------------------------
+
+static void apply_write(PilotPins &pins, const PilotWrite &w) {
+  if (w.pin == PilotPin::B) {
+    pins.b_high = w.high;
+  } else {
+    pins.c_high = w.high;
+  }
+}
+
+void test_plan_never_leaves_c_high_without_b(void) {
+  for (PilotState from : kAll) {
+    for (PilotState to : kAll) {
+      PilotPins pins = pilot_pins(from);
+      PilotWrite writes[kPilotMaxWrites];
+      const int n = pilot_plan(from, to, writes);
+      TEST_ASSERT_TRUE(n >= 0 && n <= kPilotMaxWrites);
+      for (int i = 0; i < n; i++) {
+        apply_write(pins, writes[i]);
+        TEST_ASSERT_FALSE(pins.c_high && !pins.b_high);
+      }
+      // The plan ends in exactly the pin levels of the target state.
+      TEST_ASSERT_TRUE(pins.b_high == pilot_pins(to).b_high);
+      TEST_ASSERT_TRUE(pins.c_high == pilot_pins(to).c_high);
+    }
+  }
+}
+
+void test_plan_for_the_same_state_writes_nothing(void) {
+  for (PilotState s : kAll) {
+    PilotWrite writes[kPilotMaxWrites];
+    TEST_ASSERT_EQUAL_INT(0, pilot_plan(s, s, writes));
+  }
+}
+
+void test_plan_going_up_sets_b_before_c(void) {
+  PilotWrite writes[kPilotMaxWrites];
+  TEST_ASSERT_EQUAL_INT(2, pilot_plan(PilotState::A, PilotState::C, writes));
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::B, (int)writes[0].pin);
+  TEST_ASSERT_TRUE(writes[0].high);
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::C, (int)writes[1].pin);
+  TEST_ASSERT_TRUE(writes[1].high);
+}
+
+void test_plan_going_down_clears_c_before_b(void) {
+  PilotWrite writes[kPilotMaxWrites];
+  TEST_ASSERT_EQUAL_INT(2, pilot_plan(PilotState::C, PilotState::A, writes));
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::C, (int)writes[0].pin);
+  TEST_ASSERT_FALSE(writes[0].high);
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::B, (int)writes[1].pin);
+  TEST_ASSERT_FALSE(writes[1].high);
+}
+
+void test_plan_touches_only_the_pin_that_changes(void) {
+  PilotWrite writes[kPilotMaxWrites];
+
+  TEST_ASSERT_EQUAL_INT(1, pilot_plan(PilotState::A, PilotState::B, writes));
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::B, (int)writes[0].pin);
+  TEST_ASSERT_TRUE(writes[0].high);
+
+  TEST_ASSERT_EQUAL_INT(1, pilot_plan(PilotState::B, PilotState::C, writes));
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::C, (int)writes[0].pin);
+  TEST_ASSERT_TRUE(writes[0].high);
+
+  TEST_ASSERT_EQUAL_INT(1, pilot_plan(PilotState::C, PilotState::B, writes));
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::C, (int)writes[0].pin);
+  TEST_ASSERT_FALSE(writes[0].high);
+
+  TEST_ASSERT_EQUAL_INT(1, pilot_plan(PilotState::B, PilotState::A, writes));
+  TEST_ASSERT_EQUAL_INT((int)PilotPin::B, (int)writes[0].pin);
+  TEST_ASSERT_FALSE(writes[0].high);
+}
+
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -88,5 +161,10 @@ int main(int, char **) {
   RUN_TEST(test_state_c_drives_both_pins_high);
   RUN_TEST(test_no_state_asserts_c_without_b);
   RUN_TEST(test_state_names);
+  RUN_TEST(test_plan_never_leaves_c_high_without_b);
+  RUN_TEST(test_plan_for_the_same_state_writes_nothing);
+  RUN_TEST(test_plan_going_up_sets_b_before_c);
+  RUN_TEST(test_plan_going_down_clears_c_before_b);
+  RUN_TEST(test_plan_touches_only_the_pin_that_changes);
   return UNITY_END();
 }

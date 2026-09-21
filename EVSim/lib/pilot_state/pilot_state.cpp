@@ -32,3 +32,19 @@ const char *pilot_state_name(PilotState state) {
   }
   return "?";
 }
+
+int pilot_plan(PilotState from, PilotState to, PilotWrite out[kPilotMaxWrites]) {
+  const PilotPins now = pilot_pins(from);
+  const PilotPins next = pilot_pins(to);
+  const bool going_up = static_cast<int>(to) > static_cast<int>(from);
+
+  int n = 0;
+  if (going_up) {
+    if (next.b_high != now.b_high) out[n++] = {PilotPin::B, next.b_high};
+    if (next.c_high != now.c_high) out[n++] = {PilotPin::C, next.c_high};
+  } else {
+    if (next.c_high != now.c_high) out[n++] = {PilotPin::C, next.c_high};
+    if (next.b_high != now.b_high) out[n++] = {PilotPin::B, next.b_high};
+  }
+  return n;
+}

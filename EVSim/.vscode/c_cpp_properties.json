@@ -10,6 +10,7 @@
             "includePath": [
                 "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/include",
                 "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/src",
+                "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/lib/cp_convert",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/newlib/platform_include",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/esp_additions/freertos",
@@ -206,6 +207,7 @@
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/cores/esp32",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/variants/esp32",
+                "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/.pio/libdeps/esp32dev/Unity/src",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/libraries/ArduinoOTA/src",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/libraries/AsyncUDP/src",
                 "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src",
@@ -246,6 +248,7 @@
                 "path": [
                     "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/include",
                     "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/src",
+                    "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/lib/cp_convert",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/newlib/platform_include",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/esp_additions/freertos",
@@ -442,6 +445,7 @@
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/cores/esp32",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/variants/esp32",
+                    "/Users/alexandrejewell/Desktop/Cours/TB - Travail de bachelor HES/Code/ESP32_EVSim/EVSim/.pio/libdeps/esp32dev/Unity/src",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/libraries/ArduinoOTA/src",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/libraries/AsyncUDP/src",
                     "/Users/alexandrejewell/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src",
@@ -496,6 +500,7 @@
                 "ARDUINO_VARIANT=\"esp32\"",
                 "ARDUINO_BOARD=\"Espressif ESP32 Dev Module\"",
                 "ARDUINO_PARTITION_default",
+                "UNITY_INCLUDE_CONFIG_H",
                 ""
             ],
             "cStandard": "gnu99",

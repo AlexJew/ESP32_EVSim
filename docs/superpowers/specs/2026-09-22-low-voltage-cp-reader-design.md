@@ -104,6 +104,33 @@ esp32dev-lowvoltage` while the signal is weak; flash with the normal `-e esp32de
 new PCB gives a clean signal back. The native-env comment is extended again to cover
 `lib/cp_adc_level`.
 
+## Sampling rate and accuracy
+
+The task has no hardware timer driving it — a burst of `kSamplesPerBurst = 20` back-to-back
+`analogRead()` calls, then one `vTaskDelay(1)` (≈1 ms, the FreeRTOS tick period) — so the
+effective sample rate falls out of how long a burst takes plus that rest, and isn't fixed.
+`analogRead()`'s per-call cost varies with the exact arduino-esp32 core version; at roughly
+20–150 µs/call this works out to:
+
+| `analogRead()` cost | Burst (20 reads) | Cycle (+ 1 ms rest) | Effective rate | Samples per 1 ms period |
+|---|---|---|---|---|
+| ~20 µs | 0.4 ms | 1.4 ms | ~14 kHz | ~14 |
+| ~150 µs | 3.0 ms | 4.0 ms | ~5 kHz | ~5 |
+
+A transition's true timing is only known to within one sampling interval — roughly 70–200 µs
+at these rates, against a 1 ms period. That's a single-edge timing uncertainty on the order of
+**±7% to ±20% of one period**. The 200 ms reporting window (~200 periods) should average this
+down some, since sampling isn't phase-locked to the charger's own clock, but no specific final
+figure is claimed here — this is exactly what the on-hardware validation step below is for.
+This is genuinely coarse: likely single-digit-to-teens percent, not fine calibration, though
+it should still separate current bands several points apart (6 A ≈ 10% duty, 10 A ≈ 16.7%,
+16 A ≈ 26.7%).
+
+**Deferred, not built now:** if this proves too coarse in practice, the cheap next step is
+swapping `analogRead()` for ESP-IDF's `adc_oneshot_read()`, which bypasses the Arduino
+wrapper's overhead (typically ~10–20 µs/read) for perhaps 2–5× the effective sample rate,
+still well short of full continuous/DMA mode. Not needed unless the bench numbers call for it.
+
 ## Data flow
 
 ```

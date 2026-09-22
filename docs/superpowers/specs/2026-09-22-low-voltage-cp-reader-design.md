@@ -153,11 +153,16 @@ main loop (unchanged):   cp_reader_sample() → same CpSample → cp_classify() 
   it the sampling task can starve its core's idle task and trigger a watchdog reset.
 - **Exclusive ADC ownership:** only the sampling task calls `analogRead(kCpPin)`.
   `cp_reader_sample()` never samples again itself.
-- **Known accuracy limit, accepted:** coarse periodic sampling can miss very narrow pulses
-  (duty near the 3–10% floor) and makes the reported frequency noisier than the ISR path's,
-  occasionally tripping `cp_classify()`'s 900–1100 Hz gate even when the underlying charger
-  signal is fine. This is the accepted cost of coarse sampling for an interim bench setup, not
-  fixed by this design — it goes away once the new PCB restores the clean-signal ISR path.
+- **Frequency is not measured, by design:** the ~1 ms burst/rest cadence is comparable to
+  CP's own ~1 ms period, so counting edges across a rest gap cannot reliably measure
+  frequency — a whole period can be swallowed within a single gap and never register as a
+  transition. Duty stays an unbiased estimate over the reporting window (see *Sampling rate
+  and accuracy* above), so `cp_reader_adc.cpp` reports the protocol's known nominal
+  frequency whenever any transitions are detected, rather than a computed value — which is
+  what `cp_classify()`'s 900–1100 Hz gate actually needs (confirmation that a real CP signal
+  is present), not a genuine frequency measurement. This is a deliberate limitation of the
+  coarse sampling approach, not a bug; `duty_pct` remains this reader's meaningful output.
+  Coarse periodic sampling can still miss very narrow pulses (duty near the 3–10% floor).
 
 ## Testing
 

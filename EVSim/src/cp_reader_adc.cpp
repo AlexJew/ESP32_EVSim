@@ -21,6 +21,17 @@ namespace {
 // idle task and trigger an ESP32 task-watchdog reset.
 constexpr int kSamplesPerBurst = 20;
 
+// This sampler's ~1 ms burst/rest cadence is comparable to CP's own ~1 ms
+// period, so edge counting across a rest gap cannot reliably measure
+// frequency -- a whole period can be swallowed within one gap and never
+// register as a transition. Duty stays an unbiased estimate regardless
+// (see the design spec's "Sampling rate and accuracy"), so frequency is
+// not computed from edge timing here. Report the protocol's known nominal
+// frequency whenever any transition was detected at all, which is what
+// cp_classify()'s validity gate actually needs -- confirmation that a
+// real CP signal is present, not a genuine frequency measurement.
+constexpr float kNominalCpFreqHz = 1000.0f;
+
 // Written by the sampling task, read by cp_reader_sample() under the same
 // lock. Two tasks, not an ISR, so a portMUX_TYPE spinlock is the correct
 // primitive here -- noInterrupts()/interrupts() only guard against true ISRs.
@@ -70,8 +81,9 @@ void cp_reader_begin() {
   const uint32_t now = micros();
   g_high_us = 0;
   g_edges = 0;
-  g_last_level_high = false;
   g_last_raw = analogRead(kCpPin);
+  g_last_level_high =
+      cp_adc_level_high(g_last_raw, /*previous_level=*/false, kAdcLowThreshold, kAdcHighThreshold);
   g_last_sample_us = now;
   g_window_start_us = now;
 
@@ -113,6 +125,6 @@ CpSample cp_reader_sample() {
   }
 
   s.duty_pct = 100.0f * static_cast<float>(high_us) / static_cast<float>(window_us);
-  s.freq_hz = (static_cast<float>(edges) / 2.0f) * 1e6f / static_cast<float>(window_us);
+  s.freq_hz = kNominalCpFreqHz;
   return s;
 }

@@ -34,11 +34,12 @@ dashboard) track **1:1**. At 10 A the expected CP duty is `10 / 0.6` = **16.7 %*
 ESP32's PWM measurement against. See [[evsim-amtron-live-telemetry]].
 
 ## Still open
-- An **EEBus HEMS is configured on the LAN**: `EEBUSCoupledEnergyManager_eebus` names *"Helios Home HEMS"*
-  at **192.168.188.158** (`coupled: 0`, EEBus Off). Another energy manager that could compete for control.
-  **Update 2026-09-25:** now **off-subnet**. The ESP32 and the charger both sit in `192.168.21.0/24`
-  ([[evsim-network]]), so reaching this host needs a router hop - which makes accidental
-  interference less likely, not more.
+
+**Scope, set 2026-09-25:** the project is only the loop **AMTRON -> ESP32 -> Fronius inverter**.
+Other energy managers on the LAN are out of scope and are not to be investigated. (The EEBus
+"Helios Home HEMS" that used to be listed here was dropped for this reason; it also sits
+off-subnet now - see [[evsim-network]].)
+
 - The charger has its own **MQTT client** for hierarchical DLM (`DlmcMqttBrokerAddress_dlmc`, port 8883) -
   for DLM master/slave between chargers, but proof the firmware speaks MQTT natively.
 - Whether the Fronius GEN24 can consume an MQTT setpoint at all - see [[evsim-inverter-fronius]].

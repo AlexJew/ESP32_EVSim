@@ -34,20 +34,19 @@ The laboratory host runs **no DHCP server**, so the address must be configured o
 |---|---|---|
 | ESP32 (this board) | `192.168.21.138` | — |
 | AMTRON charger | `192.168.21.117` | yes, same `/24` |
+| Fronius GEN24 inverter | `192.168.21.122` | yes, same `/24` |
 | WLAN gateway | `192.168.21.130` | yes, same `/24` |
-| "Helios Home HEMS" | `192.168.188.158` | no — off-subnet, requires a router hop |
 
-**The charger is on the same `/24` as the board**, so ESP32 -> AMTRON traffic never leaves the
-subnet and never depends on the gateway. A misconfigured or absent gateway therefore cannot
-break the thesis signal chain; it only costs off-subnet reachability.
+**All three devices in the loop share the `/24`.** The project's scope is exactly the loop
+AMTRON -> ESP32 -> Fronius, and every hop of it stays inside `192.168.21.0/24`, so none of it
+depends on the gateway. A misconfigured or absent gateway therefore cannot break the thesis
+signal chain; it only costs off-subnet reachability, which nothing in scope needs.
 
-Two consequences worth recording:
+One consequence worth recording:
 
 - The AMTRON moved from `192.168.188.186` to `192.168.21.117` when it was put on this subnet.
   `tools/charger_poll.py` already tracks the new address; `memory/evsim-amtron-rest-api.md`
   does not and must be corrected.
-- The HEMS named in `memory/evsim-open-questions.md` as a possible competing controller is now
-  behind a router hop, which makes accidental interference *less* likely, not more.
 
 ### There is no internet on this network
 
@@ -265,5 +264,7 @@ setpoint** across the charger's expected no-load current oscillation
 ## Memory corrections this design requires
 
 - `memory/evsim-amtron-rest-api.md`: charger address `192.168.188.186` -> `192.168.21.117`.
-- `memory/evsim-open-questions.md`: note that the HEMS at `192.168.188.158` is now off-subnet.
-- A new note recording the board's own network identity and the no-internet/no-DNS constraint.
+- `memory/evsim-open-questions.md`: drop the EEBus "Helios Home HEMS" entry and state the scope
+  explicitly - the project is the loop AMTRON -> ESP32 -> Fronius and nothing else on the LAN.
+- `memory/evsim-inverter-fronius.md`: record the inverter at `192.168.21.122`.
+- A new note recording the network's addressing and the no-internet/no-DNS constraint.

@@ -1,6 +1,6 @@
 ---
 name: evsim-network
-description: EVSim lab network - SSID hems, ESP32 static 192.168.21.138/24, AMTRON 192.168.21.117, gateway 192.168.21.130, no DHCP and no internet
+description: EVSim lab network - SSID hems, ESP32 static 192.168.21.138/24, AMTRON 192.168.21.117, Fronius 192.168.21.122, gateway 192.168.21.130, no DHCP and no internet
 metadata:
   type: project
 ---
@@ -13,11 +13,13 @@ configured in firmware ([[evsim-firmware-layout]]).
 | SSID | `hems` |
 | ESP32 (EVSim board) | `192.168.21.138` |
 | AMTRON charger | `192.168.21.117` |
+| Fronius GEN24 inverter | `192.168.21.122` |
 | WLAN gateway | `192.168.21.130` |
 | Subnet mask | `255.255.255.0` (`/24`) |
 
-The board and the charger share the `/24`, so **ESP32 -> AMTRON traffic never leaves the subnet**
-and does not depend on the gateway. A wrong gateway cannot break the thesis signal chain.
+**All three devices in the loop - charger, ESP32, inverter - share the `/24`**, so traffic between
+them never leaves the subnet and never depends on the gateway. A wrong gateway cannot break the
+thesis signal chain.
 
 ## Two constraints that bind every later design
 

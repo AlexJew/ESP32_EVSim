@@ -4,8 +4,11 @@
 //
 // The state is commanded over serial: send A, B or C followed by a newline.
 // GPIO32 (state C) is only ever asserted while GPIO33 (state B) is, so A -> C
-// is refused. The state is always A after reset. Publishing over MQTT, and
-// taking commands from it, come later.
+// is refused. The state is always A after reset. Send W for WiFi status.
+//
+// The board also joins the laboratory WLAN on a fixed address (wifi_config.h).
+// That never blocks this loop: no network condition may delay CP sampling.
+// Publishing over MQTT, and taking commands from it, come later.
 //
 // Output is CSV sharing column names with tools/charger_poll.py, so the two
 // logs can be merged on time to produce the calibration curve. Replies to
@@ -16,6 +19,7 @@
 
 #include "cp_convert.h"
 #include "cp_reader.h"
+#include "net_wifi.h"
 #include "pilot_driver.h"
 #include "pilot_state.h"
 
@@ -39,7 +43,33 @@ void print_float_or_blank(float value, int decimals) {
   Serial.print(value, decimals);
 }
 
+// True for a line holding exactly one 'W' or 'w', ignoring surrounding
+// whitespace -- the same leniency pilot_parse_command() gives A/B/C. Kept here
+// rather than in lib/pilot_state, because that library is the IEC 61851 state
+// model and a network status query is not a pilot state.
+bool is_status_command(const char *line) {
+  if (line == nullptr) {
+    return false;
+  }
+  const char *p = line;
+  while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+    p++;
+  }
+  if (*p != 'W' && *p != 'w') {
+    return false;
+  }
+  p++;
+  while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+    p++;
+  }
+  return *p == '\0';
+}
+
 void handle_command(const char *line) {
+  if (is_status_command(line)) {
+    net_wifi_print_status();
+    return;
+  }
   PilotState requested = PilotState::A;
   if (!pilot_parse_command(line, &requested)) {
     Serial.print("# unknown command '");
@@ -122,6 +152,13 @@ void setup() {
   Serial.println();
   Serial.println("# EVSim -- CP PWM reader on GPIO35, pilot state control on GPIO32/33");
   Serial.println("# send A, B or C to set the pilot state; A -> C is refused");
+  Serial.println("# send W for WiFi status");
+
+  // After cp_reader_begin(), so CP measurement is live before the radio starts
+  // -- the same reasoning that puts pilot_driver_begin() first. Non-blocking:
+  // the link will still be down when this returns.
+  net_wifi_begin();
+
   Serial.print("# pilot state ");
   Serial.println(pilot_state_name(g_state));
   Serial.println("millis,freq_hz,duty_pct,current_a,power_w,state,adc_raw,commanded");
@@ -129,6 +166,7 @@ void setup() {
 }
 
 void loop() {
+  net_wifi_poll();
   poll_serial();
 
   const uint32_t now = millis();

@@ -1,6 +1,6 @@
 ---
 name: evsim-pilot-state-control
-description: How the EVSim PCB fakes EV pilot states A/B/C - two MOSFETs switching 2k7 and 1k2 resistors on CP, driven by an MQTT command topic
+description: How the EVSim PCB fakes EV pilot states A/B/C - two MOSFETs switching 2k7 and 1k2 resistors on CP; PP reads 20 A (680R) as of 2026-09-25, still non-binding
 metadata:
   type: project
 ---
@@ -22,15 +22,20 @@ conflate them into one topic.
 
 ## PP is deliberately non-binding
 
-A fixed **220 Ohm** resistor sits between **PP and PE**, which per the IEC 61851 table encodes a **32 A**
-cable. The charger confirms this - the dashboard's `Type2StateConnector1_vehicleif` string reads
-`PR: 32 A Plug locked`.
+A fixed resistor sits between **PP and PE** to encode a cable rating. **Measured 2026-09-25 the
+charger reports `PR: 20 A`**, which per the table below is **680 Ohm** - not the 220 Ohm / 32 A this
+note previously recorded. The PP resistor therefore changed at some point (different board, cable,
+or a refit); trust the dashboard over any remembered value.
 
-**Why:** 32 A is far above the charger's 16 A `InstallationCurrentLimit_vehicleif`, so the proximity pilot
-**never constrains the current**. Control of the charging current sits **entirely with the AMTRON**, signalled
+The argument below is unaffected: 20 A is still above the charger's 16 A
+`InstallationCurrentLimit_vehicleif`, so PP still never constrains the current. The margin is just
+smaller than it was, so **re-check this if the installation limit is ever raised above 20 A**.
+
+**Why:** the encoded cable rating is above the charger's 16 A `InstallationCurrentLimit_vehicleif`, so the
+proximity pilot **never constrains the current**. Control of the charging current sits **entirely with the AMTRON**, signalled
 over CP. This is intentional, not incidental: it removes PP as a variable so every observed current change
 is attributable to the REST command alone - one input, one output.
 
-**How to apply:** never treat PP as part of the control loop, and do not "fix" the 220 Ohm value. If a
-future test needs PP to bind, the gonium table is 100R=63A, 220R=32A, 680R=20A, 1500R=13A
+**How to apply:** never treat PP as part of the control loop, and do not "fix" the fitted resistor to match
+an older note. If a future test needs PP to bind, the gonium table is 100R=63A, 220R=32A, 680R=20A, 1500R=13A
 ([[evsim-reference-gonium]]).

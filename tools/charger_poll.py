@@ -32,7 +32,7 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_HOST = "192.168.188.186"
+DEFAULT_HOST = "192.168.21.117"
 
 # Fields pulled out of dashboard.json. Everything else in the response is ignored.
 DASH_FIELDS = {

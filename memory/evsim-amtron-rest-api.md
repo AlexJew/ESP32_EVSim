@@ -1,11 +1,13 @@
 ---
 name: evsim-amtron-rest-api
-description: Working recipe for the AMTRON REST API at 192.168.188.186 - Authorization token header, GET/POST /json/settings.json, and the OperatorCurrentLimit_vehicleif key that sets max current
+description: Working recipe for the AMTRON REST API at 192.168.21.117 (moved from 192.168.188.186) - Authorization token header, GET/POST /json/settings.json, and the OperatorCurrentLimit_vehicleif key that sets max current
 metadata:
   type: reference
 ---
 
-Charger: **http://192.168.188.186** (plain HTTP, HTTPS off). Controller is a **Phoenix Contact CC612**
+Charger: **http://192.168.21.117** (plain HTTP, HTTPS off). It was moved to this address on
+**2026-09-25** when it was put on the `hems` WLAN's subnet; it was previously
+`192.168.188.186`, which appears in older notes and logs. See [[evsim-network]]. Controller is a **Phoenix Contact CC612**
 (`ChargePointModel_branding` = `CC612_2S0R_CC`, vendor MENNEKES, serial `1349401.01393`) - so
 Phoenix Contact CC612 / charge-control documentation applies to this unit.
 

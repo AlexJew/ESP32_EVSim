@@ -36,6 +36,9 @@ ESP32's PWM measurement against. See [[evsim-amtron-live-telemetry]].
 ## Still open
 - An **EEBus HEMS is configured on the LAN**: `EEBUSCoupledEnergyManager_eebus` names *"Helios Home HEMS"*
   at **192.168.188.158** (`coupled: 0`, EEBus Off). Another energy manager that could compete for control.
+  **Update 2026-09-25:** now **off-subnet**. The ESP32 and the charger both sit in `192.168.21.0/24`
+  ([[evsim-network]]), so reaching this host needs a router hop - which makes accidental
+  interference less likely, not more.
 - The charger has its own **MQTT client** for hierarchical DLM (`DlmcMqttBrokerAddress_dlmc`, port 8883) -
   for DLM master/slave between chargers, but proof the firmware speaks MQTT natively.
 - Whether the Fronius GEN24 can consume an MQTT setpoint at all - see [[evsim-inverter-fronius]].

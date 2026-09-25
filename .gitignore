@@ -10,3 +10,4 @@ tools/*.csv
 
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
+tools/__pycache__/

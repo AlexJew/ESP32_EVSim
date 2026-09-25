@@ -835,7 +835,8 @@ Expected: build SUCCESS, all three native suites pass.
 cd EVSim && ~/.platformio/penv/bin/pio run -e esp32dev -t upload && ~/.platformio/penv/bin/pio device monitor
 ```
 
-Expected within a few seconds of boot:
+Expected within a few seconds of boot, and confirm the **`Connecting -> Connected` line
+specifically**, not merely that something printed:
 
 ```
 # net_wifi: Idle -> Connecting
@@ -843,6 +844,13 @@ Expected within a few seconds of boot:
 ```
 
 CSV rows must be flowing the whole time, including while `Connecting`. If they pause, stop here: something in the shim is blocking, which violates the design's central invariant.
+
+Note: whether `esp_netif` posts `GOT_IP` for a *static* IP could not be proven from source in
+review — only `ARDUINO_EVENT_WIFI_STA_GOT_IP` sets `WL_CONNECTED`. It is very likely fine;
+countless static-IP sketches rely on it. But if `W` ever shows the correct IP while the phase
+sits in `Connecting` or `Backoff`, that mismatch is the cause, and the fix is to derive
+`link_up` from `WiFi.status() == WL_CONNECTED || WiFi.localIP() != INADDR_NONE` instead of from
+`WiFi.status()` alone.
 
 - [ ] **Step 9: Confirm the addressing**
 
@@ -877,7 +885,22 @@ In the monitor: send `B`, expect `# state A -> B`. Send `C`, expect `# state B -
 
 - [ ] **Step 12: The jitter measurement — the point of the exercise**
 
-Set a fixed current limit on the charger, present state C, and capture two 60-second CSV logs against it: one with the AP powered off (or out of range), one connected. Then compare:
+**The baseline is not "AP powered off."** With the AP off, the radio scans continuously and the
+core-1 Arduino event task fires on every `NO_AP_FOUND`, while `net_wifi_poll()` keeps running
+every pass regardless — that measures *scanning* against *associated-and-idle*, and
+associated-and-idle is arguably the quieter of the two. Comparing those two can plausibly show a
+negative delta and pass while the real question — does an associated, idle radio disturb the
+ISR? — goes unanswered. Instead, flash the pre-WiFi commit `15a21d4` (it is in git, with
+identical CP code) and log 60 s from that, then flash the branch and log 60 s **connected**.
+Same charger current limit, same pilot state C, for both.
+
+**Discard the first CSV row of every log.** The first measurement window straddles
+`esp_wifi_init()`/`esp_wifi_start()` and their NVS access, during which both CPUs stall and
+edges are lost; `window_us` includes the stall but `high_us` does not, so row 1 under-reports
+`duty_pct` and `freq_hz`. In a 60 s standard deviation it is a real outlier with nothing to do
+with steady-state WiFi. Start each log a couple of seconds after boot.
+
+Then compare:
 
 ```bash
 # for each log, over rows whose state column is PwmValid
@@ -895,11 +918,21 @@ PY
 
 **Acceptance:** the `duty_pct` standard deviation grows by no more than **0.1 percentage points** — the resolution the reader claims — and `freq_hz` stays within **1 Hz** of 1000 Hz.
 
-If it fails, do not patch around it: report the numbers and stop. The escalation path, in order, is a dedicated core-0 FreeRTOS task for the network layer, then the MCPWM capture unit. Both are larger changes that need their own design pass.
+If it fails, do not patch around it: report the numbers and stop. The escalation path, in order,
+is: first, gate `net_wifi_poll()`'s body on a 100 ms `millis()` check, so `WiFi.status()` is
+called five times a second instead of once per loop pass — the cheapest lever, worth trying
+before anything structural; then a dedicated core-0 FreeRTOS task for the network layer; then the
+MCPWM capture unit. The latter two are larger changes that need their own design pass.
 
 - [ ] **Step 13: Confirm reconnection**
 
 With a log running, power-cycle the AP. Expected: a `Connected -> Backoff, retry in 1000 ms` line, then `Backoff -> Connecting`, then `Connecting -> Connected, ip 192.168.21.138` once the AP is back. **CSV rows must continue without a gap throughout.**
+
+"No gap in the CSV rows" is not enough on its own — it passes even if an interval quietly
+stretched to 400 ms. Check the `millis` column deltas across the `Connected -> Backoff` and
+`Backoff -> Connecting` lines specifically: those are the only moments this code makes a
+synchronous SDK call from `loop()`. If the deltas there come back at ~200 ms like everywhere
+else, the non-blocking invariant is empirically settled.
 
 - [ ] **Step 14: Commit**
 

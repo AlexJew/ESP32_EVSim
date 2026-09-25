@@ -10,6 +10,7 @@ namespace {
 
 NetState g_state;
 bool g_begun = false;
+bool g_static_ip_applied = false;
 
 }  // namespace
 
@@ -18,8 +19,24 @@ void net_wifi_begin() {
   // such write is a flash operation, and flash writes disable the instruction
   // cache on BOTH cores -- the one mechanism by which WiFi can genuinely
   // disturb the IRAM_ATTR CP ISR. The credentials are compiled in, so
-  // persisting them buys nothing.
+  // persisting them buys nothing. MUST precede WiFi.mode(): _persistent is
+  // only consulted inside wifiLowLevelInit(), which mode() runs once and
+  // guards with lowLevelInitDone, so calling this after mode() is a silent
+  // no-op with no warning of any kind.
   WiFi.persistent(false);
+
+  // arduino-esp32 runs its own reconnect engine underneath whatever we do:
+  // by default it redials every ~1-2 s on NO_AP_FOUND, BEACON_TIMEOUT and
+  // similar reasons, from the WiFi event task, racing the policy in
+  // lib/net_state. Two retry engines must not both own retry timing, so this
+  // one is switched off; lib/net_state is the only thing allowed to decide
+  // when to retry. MUST precede WiFi.mode(WIFI_STA) below, and is a plain
+  // flag write -- nothing to block on. Note that the SDK still grants exactly
+  // one retry on the very first disconnect regardless of this flag (a
+  // separate `first_connect` latch inside WiFiGeneric.cpp); that single extra
+  // attempt is harmless and not worth fighting, so do not read it as evidence
+  // that this flag failed.
+  WiFi.setAutoReconnect(false);
 
   WiFi.mode(WIFI_STA);  // station only; never bring up the soft AP
 
@@ -30,7 +47,8 @@ void net_wifi_begin() {
   // MUST precede WiFi.begin(). Called after, the board associates and then
   // waits out a DHCP lease that will never arrive on this network, which
   // presents as "connects, but has no IP".
-  if (!WiFi.config(kStaticIp, kGateway, kSubnetMask, kDns)) {
+  g_static_ip_applied = WiFi.config(kStaticIp, kGateway, kSubnetMask, kDns);
+  if (!g_static_ip_applied) {
     Serial.println("# net_wifi: WiFi.config() failed -- static IP NOT applied");
   }
 
@@ -91,6 +109,13 @@ void net_wifi_print_status() {
   Serial.print(static_cast<int>(WiFi.status()));
   Serial.print(", ssid ");
   Serial.println(kWifiSsid);
+
+  // The boot-time failure line (above, in net_wifi_begin()) scrolls off long
+  // before anyone thinks to look for it. This is the same fact, answerable at
+  // the bench without a reboot: if it ever reads "no", the board associated
+  // but fell back to DHCP, and on this network no lease ever arrives.
+  Serial.print("# net_wifi: static ip applied ");
+  Serial.println(g_static_ip_applied ? "yes" : "no");
 
   Serial.print("# net_wifi: ip ");
   Serial.print(WiFi.localIP());

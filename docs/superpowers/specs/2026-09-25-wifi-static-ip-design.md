@@ -21,6 +21,7 @@ The laboratory host runs **no DHCP server**, so the address must be configured o
 | Parameter | Value |
 |---|---|
 | SSID | `hems` |
+| Password | see `EVSim/src/wifi_config.h` |
 | Static IP | `192.168.21.138` |
 | Subnet mask | `255.255.255.0` (`/24`) |
 | Gateway | `192.168.21.130` (WLAN gateway) |
@@ -130,7 +131,10 @@ Policy it owns:
 
 - **Association timeout: 10 s.** `Connecting` for longer than this is a failure.
 - **Bounded exponential backoff: 1 s, 2 s, 4 s, 8 s, 16 s, capped at 30 s.** A downed AP
-  produces one retry every 30 s, not a hot loop. The cap matters: unbounded backoff would
+  produces one retry every 30 s, not a hot loop -- but only because `WiFi.setAutoReconnect(false)`
+  disables arduino-esp32's own reconnect engine first. Left at its default, that engine redials
+  every 1-2 s on its own, from the WiFi event task, underneath whatever this policy decides,
+  which would make the bound below fictional. The cap matters: unbounded backoff would
   eventually stop retrying for hours, and a dead-flat 1 s retry would hammer the radio and add
   avoidable CPU contention to the ISR.
 - **Backoff resets to 1 s on a successful connection**, so a board that has been up for days
@@ -214,7 +218,8 @@ for the network layer, then the MCPWM capture unit.
 | Condition | Behaviour |
 |---|---|
 | AP absent or out of range | `Connecting` times out at 10 s, backoff, retry forever at up to 30 s intervals. CP measurement and CSV output continue throughout. |
-| Wrong password | Indistinguishable from the above at this layer, so treated identically. `WiFi.status()` is reported by `W` so the cause is diagnosable by hand. |
+| Wrong password | Indistinguishable from the above at this layer, so treated identically. `WiFi.status()` is reported by `W` so the cause is diagnosable by hand: `1` is `WL_NO_SSID_AVAIL` (no such AP), `4` is `WL_CONNECT_FAILED` (`AUTH_FAIL`), and `5` is `WL_CONNECTION_LOST` — which is what a wrong WPA2 passphrase usually produces, via `4WAY_HANDSHAKE_TIMEOUT`. |
+| `WiFi.config()` fails at boot | The board associates but silently falls back to DHCP; no lease ever arrives on this network, so it loops `Connecting`/`Backoff` forever. Diagnosed by `W`, which reports whether the static IP was actually applied. |
 | Static IP already in use | The board associates and reports `WL_CONNECTED`, but traffic fails. **Not detectable in this design** and explicitly out of scope — the assigned address is assumed unique. Symptom to recognise later: connects fine, IP correct, nothing answers. |
 | AP reboots mid-session | `link_up` goes false, phase returns to `Backoff`, reconnects in about 1 s because the backoff was reset on the earlier success. |
 | DNS absent or dead | No effect. Nothing resolves hostnames, by design. |

@@ -128,6 +128,7 @@ void test_link_lost_while_connected_backs_off_and_reconnects(void) {
 
   const NetStep lost = net_step(s, false, 10000);
   TEST_ASSERT_EQUAL_INT((int)NetPhase::Backoff, (int)lost.state.phase);
+  TEST_ASSERT_EQUAL_INT((int)NetAction::None, (int)lost.action);
 
   // Because the backoff was reset on the earlier success, the board retries
   // about a second later rather than thirty.

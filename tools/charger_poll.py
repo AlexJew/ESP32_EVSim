@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
-"""Poll the AMTRON's dashboard and log the current it signals on CP.
+"""Poll the AMTRON's dashboard and log every field it reports.
 
 Purpose: produce a timestamped log of SignaledCurrentLimit_vehicleif so it can be
 lined up against the duty cycle the ESP32 measures on the CP line. That validates
 the ESP32's duty -> current conversion against the charger's own numbers.
+
+Every run writes a CSV to data/ automatically, named for the moment it started.
+The first columns are the stable ones the calibration workflow depends on -- they
+share names with the firmware's serial CSV so the two logs merge on time. After
+those comes one column per remaining dashboard field, so nothing the charger
+reports is thrown away.
+
+Because the trailing columns are discovered from the charger's own field list,
+they can differ between charger firmware versions; the leading columns cannot.
+Prefer the leading columns for anything you intend to compare across runs.
 
 The charger is a Phoenix Contact CC612 behind a MENNEKES AMTRON Charge Control.
 Only the standard library is used, so there is nothing to pip install.
@@ -14,10 +24,11 @@ Tokens expire; a 401 means fetch a fresh one.
 
 Examples:
     export EVSIM_TOKEN=b37ce7a5-...
-    ./charger_poll.py                          # stream to the terminal
-    ./charger_poll.py --csv run1.csv           # ...and record it
+    ./charger_poll.py                          # stream, and log to data/
     ./charger_poll.py --duration 120           # stop after two minutes
-    ./charger_poll.py --sweep 6,8,10,13,16 --csv sweep.csv   # WRITES to charger
+    ./charger_poll.py --csv run1.csv           # name the file yourself
+    ./charger_poll.py --no-csv                 # terminal only, write nothing
+    ./charger_poll.py --sweep 6,8,10,13,16     # WRITES to the charger
 """
 
 from __future__ import annotations
@@ -34,7 +45,15 @@ import urllib.request
 
 DEFAULT_HOST = "192.168.21.117"
 
-# Fields pulled out of dashboard.json. Everything else in the response is ignored.
+# Where logs land when --csv is not given. Relative to the repository root, not
+# the caller's shell, so the file ends up in the same place wherever it is run
+# from. *.csv is gitignored, so nothing here is committed.
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+# Dashboard fields promoted to friendly column names. These are the ones the
+# calibration workflow reads, so their names are a contract: the firmware's
+# serial CSV is merged against them on time. Every OTHER dashboard field is
+# still logged, under its own raw charger key, after these.
 DASH_FIELDS = {
     "SignaledCurrentLimit_vehicleif": "signaled",
     "Type2StateConnector1_vehicleif": "type2_state",
@@ -44,6 +63,8 @@ DASH_FIELDS = {
 LIMIT_KEY = "OperatorCurrentLimit_vehicleif"
 INSTALL_LIMIT_KEY = "InstallationCurrentLimit_vehicleif"
 
+# The leading, stable columns. The charger's remaining fields are appended after
+# these, sorted by key, once the first sample reveals what they are.
 CSV_COLUMNS = [
     "iso_time",
     "elapsed_s",
@@ -55,6 +76,12 @@ CSV_COLUMNS = [
     "ocpp_state",
     "meter_current",
 ]
+
+
+def default_csv_path(started: float) -> str:
+    """data/charger_YYYY-MM-DD_HH-MM-SS.csv, named for when the run started."""
+    stamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(started))
+    return os.path.join(DATA_DIR, f"charger_{stamp}.csv")
 
 
 class AuthError(RuntimeError):
@@ -99,12 +126,17 @@ def _walk_fields(doc: dict):
 
 
 def read_dashboard(host: str, token: str) -> dict:
+    """Every field dashboard.json exposes, keyed by its raw charger key.
+
+    Returns the whole set rather than a filtered few: build_row() promotes the
+    handful in DASH_FIELDS to friendly names and logs the rest as they are.
+    """
     doc = _request(host, "/json/dashboard.json", token)
     out = {}
     for field in _walk_fields(doc):
-        name = DASH_FIELDS.get(field.get("key"))
-        if name:
-            out[name] = field.get("value")
+        key = field.get("key")
+        if key:
+            out[key] = field.get("value")
     return out
 
 
@@ -172,21 +204,110 @@ def clean(text) -> str:
 # --- polling ----------------------------------------------------------------
 
 
+class CsvSink:
+    """Writes rows to a CSV, opening the file on the first row.
+
+    The column set cannot be known up front: the trailing columns come from the
+    charger's own field list, which is only visible once a sample has arrived.
+    So the header is derived from the first row rather than hard-coded.
+
+    Appending to an existing file reuses that file's header, so a run pointed at
+    an earlier log stays readable even if the charger now reports a different
+    field set. Fields absent from the header are dropped, and a note is printed
+    once rather than every second.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self.rows = 0
+        self._handle = None
+        self._writer = None
+        self._warned = False
+
+    def writerow(self, row: dict) -> None:
+        if self._writer is None:
+            self._open(row)
+        writer = self._writer
+        assert writer is not None  # _open() always assigns it
+
+        dropped = [k for k in row if k not in writer.fieldnames]
+        if dropped and not self._warned:
+            self._warned = True
+            print(
+                f"  ... {len(dropped)} field(s) not in this file's header are not "
+                f"being logged ({', '.join(sorted(dropped)[:3])}). "
+                f"Start a new run to capture them.",
+                file=sys.stderr,
+            )
+
+        writer.writerow(row)
+        self.rows += 1
+
+    def _open(self, first_row: dict) -> None:
+        parent = os.path.dirname(self.path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        existing = self._existing_header()
+        if existing:
+            fieldnames = existing
+        else:
+            extra = sorted(k for k in first_row if k not in CSV_COLUMNS)
+            fieldnames = CSV_COLUMNS + extra
+
+        self._handle = open(self.path, "a", newline="")
+        self._writer = csv.DictWriter(
+            self._handle, fieldnames=fieldnames, extrasaction="ignore"
+        )
+        if not existing:
+            self._writer.writeheader()
+
+    def _existing_header(self) -> list[str] | None:
+        """The header of a non-empty file we are appending to, if there is one."""
+        if not os.path.exists(self.path) or os.path.getsize(self.path) == 0:
+            return None
+        with open(self.path, newline="") as f:
+            header = next(csv.reader(f), None)
+        return header or None
+
+    @property
+    def columns(self) -> int:
+        """How many columns the header ended up with; 0 before the first row."""
+        return len(self._writer.fieldnames) if self._writer else 0
+
+    def close(self) -> None:
+        if self._handle:
+            self._handle.close()
+
+
 def build_row(sample: dict, limit: int | None, started: float) -> dict:
-    amps = parse_amps(sample.get("signaled"))
+    """One CSV row: the stable columns first, then every other charger field.
+
+    `sample` is the raw key -> value mapping from read_dashboard().
+    """
+    named = {name: sample.get(key) for key, name in DASH_FIELDS.items()}
+    amps = parse_amps(named.get("signaled"))
     duty = current_to_duty(amps) if amps else None
     now = time.time()
-    return {
+    row = {
         "iso_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
         "elapsed_s": round(now - started, 2),
         "operator_limit_a": limit if limit is not None else "",
         "signaled_a": amps if amps is not None else "",
         "expected_duty_pct": round(duty, 2) if duty is not None else "",
         "offering": int(bool(amps)),
-        "type2_state": clean(sample.get("type2_state")),
-        "ocpp_state": clean(sample.get("ocpp_state")),
-        "meter_current": clean(sample.get("meter_current")),
+        "type2_state": clean(named.get("type2_state")),
+        "ocpp_state": clean(named.get("ocpp_state")),
+        "meter_current": clean(named.get("meter_current")),
     }
+
+    # Everything else the charger reported, under its own key. The four already
+    # promoted above are skipped rather than duplicated. Values go through
+    # clean() too, since several carry the web UI's embedded <br> tags.
+    for key, value in sample.items():
+        if key not in DASH_FIELDS:
+            row[key] = clean(value) if value is not None else ""
+    return row
 
 
 def format_row(row: dict) -> str:
@@ -280,7 +401,15 @@ def main() -> int:
     )
     parser.add_argument("--interval", type=float, default=1.0, help="seconds between polls")
     parser.add_argument("--duration", type=float, default=0, help="stop after N seconds (0 = forever)")
-    parser.add_argument("--csv", help="append samples to this CSV file")
+    parser.add_argument(
+        "--csv",
+        help="write to this path instead of an auto-named file in data/",
+    )
+    parser.add_argument(
+        "--no-csv",
+        action="store_true",
+        help="stream to the terminal only; write no file",
+    )
     parser.add_argument(
         "--sweep",
         help="comma-separated amps to step through, e.g. 6,8,10,13,16. WRITES to the charger.",
@@ -306,28 +435,32 @@ def main() -> int:
         file=sys.stderr,
     )
 
-    handle = writer = None
-    if args.csv:
-        new_file = not os.path.exists(args.csv)
-        handle = open(args.csv, "a", newline="")
-        writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
-        if new_file:
-            writer.writeheader()
+    sink = None
+    if not args.no_csv:
+        path = args.csv or default_csv_path(time.time())
+        sink = CsvSink(path)
+        print(f"logging to {path}", file=sys.stderr)
 
     try:
         if args.sweep:
-            sweep_loop(args, args.token, writer, limits)
+            sweep_loop(args, args.token, sink, limits)
         else:
-            poll_loop(args, args.token, writer, limits)
+            poll_loop(args, args.token, sink, limits)
     except KeyboardInterrupt:
         print("\nstopped", file=sys.stderr)
     except AuthError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     finally:
-        if handle:
-            handle.close()
-            print(f"wrote {args.csv}", file=sys.stderr)
+        if sink:
+            sink.close()
+            if sink.rows:
+                print(
+                    f"wrote {sink.path} ({sink.rows} rows, {sink.columns} columns)",
+                    file=sys.stderr,
+                )
+            else:
+                print("no rows captured; no file written", file=sys.stderr)
     return 0
 
 

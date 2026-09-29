@@ -33,12 +33,14 @@ constexpr int kDmaBufCount = 8;
 constexpr int kDmaBufLen = 512;  // samples per DMA buffer (~5 ms)
 
 // The I2S clock dividers cannot make exactly the 100 kHz requested. The rate
-// they give, 99 328 Hz, was measured on the board (99 327-99 328 samples/s in
-// one-second windows). It comes from the same crystal as the system timer, so it
-// does not drift. A runtime calibration against the system clock was tried and
-// removed: DMA buffers are lost while WiFi starts, which biased it low by ~0.3 %
-// for a minute.
-constexpr float kSampleRateActualHz = 99328.0f;
+// they give is 99 217.7 Hz (+/- 1.6), the mean of 325 one-second windows measured
+// on the board. It comes from the same crystal as the system timer, so it does
+// not drift. Single one-second windows read 98 816 or 99 328 samples because the
+// DMA delivers whole 512-sample buffers (193 or 194 per second), so only a long
+// mean measures the rate. A runtime calibration against the system clock was
+// tried and removed: DMA buffers are lost while WiFi starts at boot, which
+// biased it low.
+constexpr float kSampleRateActualHz = 99217.7f;
 
 // The window is written by the DMA task and taken by cp_reader_sample() under
 // one spinlock, held only for one buffer's worth of counting or one copy.
@@ -122,6 +124,8 @@ CpSample cp_reader_sample() {
 
 #if CP_ADC_DEBUG
   // sample() is called every 200 ms: every 5th call, print the rate seen against micros().
+  // Single-second values are quantized to whole DMA buffers (193 or 194 per second),
+  // so compare the average over a minute or more with the constant, not one line.
   static uint64_t total_samples = 0;
   static uint32_t last_print_us = 0;
   static int calls = 0;
@@ -133,8 +137,9 @@ CpSample cp_reader_sample() {
     const uint32_t now_us = micros();
     const uint32_t elapsed_us = now_us - last_print_us;
     if (elapsed_us != 0) {
-      Serial.printf("# cp_adc: %.1f samples/s (assumed 99328)\n",
-                    static_cast<double>(total_samples) * 1e6 / static_cast<double>(elapsed_us));
+      Serial.printf("# cp_adc: %.1f samples/s (assumed %.1f)\n",
+                    static_cast<double>(total_samples) * 1e6 / static_cast<double>(elapsed_us),
+                    static_cast<double>(kSampleRateActualHz));
     }
     last_print_us = now_us;
     total_samples = 0;

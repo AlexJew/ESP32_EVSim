@@ -10,8 +10,9 @@
 //
 // The board also joins the laboratory WLAN on a fixed address (wifi_config.h)
 // and keeps an MQTT link to the broker (mqtt_config.h). Neither may block this
-// loop: no network condition may delay CP sampling. Publishing the CP
-// measurements over MQTT comes later.
+// loop: no network condition may delay CP sampling. Every sample is also
+// published on evsim/cp as one JSON message with its held setpoint (see
+// lib/cp_setpoint); the CSV below is unchanged.
 //
 // Output is CSV sharing column names with tools/charger_poll.py, so the two
 // logs can be merged on time to produce the calibration curve. Replies to
@@ -22,7 +23,9 @@
 #include <stdio.h>
 
 #include "cp_convert.h"
+#include "cp_json.h"
 #include "cp_reader.h"
+#include "cp_setpoint.h"
 #include "mqtt_proto.h"
 #include "net_mqtt.h"
 #include "net_wifi.h"
@@ -36,6 +39,10 @@ uint32_t g_next_sample_ms = 0;
 
 // The state the board is commanded to present. Always A after reset.
 PilotState g_state = PilotState::A;
+
+// The held-setpoint state (lib/cp_setpoint). Reset whenever the pilot state
+// changes, so a held value can never outlive the state C it was measured in.
+SetpointState g_setpoint = setpoint_init();
 
 constexpr size_t kLineMax = 16;
 char g_line[kLineMax];
@@ -123,6 +130,7 @@ void handle_command(const char *line, Source source) {
            pilot_state_name(result.state));
   reply(source, text);
   g_state = result.state;
+  g_setpoint = setpoint_init();
   net_mqtt_publish_state(g_state);
 }
 
@@ -239,4 +247,30 @@ void loop() {
   Serial.print(sample.adc_raw);
   Serial.print(',');
   Serial.println(pilot_state_name(g_state));
+
+  // Telemetry after the CSV row, so nothing new can precede it. A sample is
+  // valid only if it is a usable offer whose power is a number.
+  const bool valid = state == CpState::PwmValid && !std::isnan(watts);
+  const SetpointStep setpoint = setpoint_step(
+      g_setpoint, g_state == PilotState::C, valid, watts, now);
+  g_setpoint = setpoint.state;
+
+  CpJsonFields fields;
+  fields.t_ms = now;
+  fields.freq_hz = sample.freq_hz;
+  fields.duty_pct = sample.duty_pct;
+  fields.adc_raw = sample.adc_raw;
+  fields.cp = cp_state_name(state);
+  fields.state = pilot_state_name(g_state);
+  fields.amps = amps;
+  fields.watts = watts;
+  fields.setpoint_w = setpoint.setpoint_w;
+  fields.status = setpoint_status_name(setpoint.status);
+  fields.age_known = setpoint.age_known;
+  fields.age_ms = setpoint.age_ms;
+
+  char json[kMqttCpCapacity];
+  if (cp_json_format(json, sizeof json, fields) > 0) {
+    net_mqtt_publish_cp(json);
+  }
 }

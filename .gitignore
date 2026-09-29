@@ -6,7 +6,6 @@
 
 # Charger calibration logs (may contain site-specific data)
 tools/*.csv
-*.csv
 
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/

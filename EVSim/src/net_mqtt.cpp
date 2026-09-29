@@ -27,13 +27,18 @@ struct TxItem {
   char text[64];
 };
 
+struct CpItem {
+  char text[kMqttCpCapacity];
+};
+
 constexpr UBaseType_t kRxDepth = 4;
 constexpr UBaseType_t kTxDepth = 8;
-constexpr uint32_t kPumpPeriodMs = 100;
+constexpr uint32_t kPumpPeriodMs = 20;  // short, so the telemetry mailbox is served promptly
 
 esp_mqtt_client_handle_t g_client = nullptr;
 QueueHandle_t g_rx = nullptr;
 QueueHandle_t g_tx = nullptr;
+QueueHandle_t g_cp = nullptr;  // one slot, written with xQueueOverwrite
 
 // Written by one task each, read by others; atomics rather than volatile so the
 // counters do not tear.
@@ -45,8 +50,11 @@ std::atomic<uint32_t> g_ignored_rx{0};
 std::atomic<uint32_t> g_dropped_rx{0};
 std::atomic<uint32_t> g_dropped_tx{0};
 std::atomic<uint32_t> g_errors{0};
+std::atomic<uint32_t> g_cp_replaced{0};  // unsent telemetry replaced by a newer sample
 
-// Runs in the esp-mqtt task. Must stay short and must not touch Serial.
+// Runs in the esp-mqtt task, or in the pump task when a publish or stop fails;
+// the DATA branch only ever runs in the esp-mqtt task. Must stay short and must
+// not touch Serial.
 esp_err_t on_event(esp_mqtt_event_handle_t event) {
   switch (event->event_id) {
     case MQTT_EVENT_CONNECTED: {
@@ -107,6 +115,14 @@ void pump_task(void *) {
       }
     }
 
+    // Telemetry comes after the control queue, so a state change or reply is
+    // never held up behind it. A QoS 0 publish is sent from this task and may
+    // wait for the network; that delays only this task, never loop().
+    CpItem cp;
+    if (xQueueReceive(g_cp, &cp, 0) == pdTRUE && g_connected) {
+      esp_mqtt_client_publish(g_client, kMqttTopicCp, cp.text, 0, 0, 0);
+    }
+
     // An internal disconnect with WiFi still up makes esp-mqtt reconnect by
     // itself and re-send its outbox (queued and unacknowledged QoS 1 items
     // younger than 30 s) AFTER our CONNECTED handler published the current
@@ -162,6 +178,7 @@ void net_mqtt_begin() {
 
   g_rx = xQueueCreate(kRxDepth, sizeof(RxItem));
   g_tx = xQueueCreate(kTxDepth, sizeof(TxItem));
+  g_cp = xQueueCreate(1, sizeof(CpItem));
 
   esp_mqtt_client_config_t config = {};
   config.uri = kMqttBrokerUri;
@@ -176,13 +193,14 @@ void net_mqtt_begin() {
   config.reconnect_timeout_ms = kMqttReconnectMs;
   g_client = esp_mqtt_client_init(&config);
 
-  if (g_rx == nullptr || g_tx == nullptr || g_client == nullptr ||
+  if (g_rx == nullptr || g_tx == nullptr || g_cp == nullptr || g_client == nullptr ||
       xTaskCreatePinnedToCore(pump_task, "mqtt_pump", 6144, nullptr, 1, nullptr,
                               0) != pdPASS) {
     Serial.println("# net_mqtt: init failed -- MQTT disabled");
     g_client = nullptr;
     g_rx = nullptr;
     g_tx = nullptr;
+    g_cp = nullptr;
   }
 }
 
@@ -207,6 +225,20 @@ void net_mqtt_publish_reply(const char *text) {
   push_tx(TxKind::Reply, text);
 }
 
+void net_mqtt_publish_cp(const char *json) {
+  if (g_cp == nullptr || json == nullptr || strlen(json) >= kMqttCpCapacity) {
+    return;
+  }
+  CpItem item;
+  memcpy(item.text, json, strlen(json) + 1);
+  // The pump may take the old item between this check and the overwrite, which
+  // only miscounts a replacement by one.
+  if (uxQueueMessagesWaiting(g_cp) != 0) {
+    g_cp_replaced++;
+  }
+  xQueueOverwrite(g_cp, &item);
+}
+
 void net_mqtt_print_status() {
   if (g_client == nullptr) {
     Serial.println("# net_mqtt: disabled (init failed)");
@@ -225,5 +257,7 @@ void net_mqtt_print_status() {
   Serial.print(", dropped tx ");
   Serial.print(g_dropped_tx.load());
   Serial.print(", errors ");
-  Serial.println(g_errors.load());
+  Serial.print(g_errors.load());
+  Serial.print(", cp replaced ");
+  Serial.println(g_cp_replaced.load());
 }

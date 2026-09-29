@@ -18,6 +18,10 @@ constexpr char kMqttTopicState[] = "evsim/state";
 constexpr char kMqttTopicReply[] = "evsim/reply";
 constexpr char kMqttTopicStatus[] = "evsim/status";
 
+// One JSON message per CP sample: the raw measurement plus the held setpoint.
+// QoS 0, not retained; see the CP telemetry spec.
+constexpr char kMqttTopicCp[] = "evsim/cp";
+
 // The broker publishes the last-will about 1.5 x this after the board vanishes.
 constexpr int kMqttKeepaliveS = 10;
 

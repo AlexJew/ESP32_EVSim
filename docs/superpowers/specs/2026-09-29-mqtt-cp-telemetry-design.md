@@ -4,13 +4,17 @@
 **Status:** awaiting review
 **Scope:** publish every CP sample over MQTT, together with a held power setpoint that survives the
 charger's periodic gaps and drops to zero when the pilot leaves state C. Smoothing the noisy duty
-reading is **not** done on the board; the server does it. Builds on
+reading is **not** done on the board; the consumer of the stream does it. Builds on
 [2026-09-29-mqtt-state-commands-design.md](2026-09-29-mqtt-state-commands-design.md).
 
 ## Purpose
 
-The thesis loop is AMTRON → ESP32 → server → Fronius inverter. The server needs the CP
-measurements to compute a power setpoint. Two properties of the signal shape this design:
+The thesis loop is AMTRON → ESP32 → Fronius inverter. Whatever computes the inverter's power
+setpoint needs the CP measurements. Who that is has **not been decided**: a separate server that
+subscribes to this stream, a broker-side bridge (the GEN24 is not known to accept an MQTT setpoint;
+it offers Modbus TCP and a read-only REST API, see `memory/evsim-inverter-fronius.md`), or the
+board itself with a Modbus client added later. This design does not depend on the choice: the
+board publishes the same stream in every case. Two properties of the signal shape it:
 
 1. **The charger's offer vanishes for a few seconds** every 6–12 s when nothing draws current
    (`memory/evsim-open-questions.md`). Publishing every sample as a setpoint would send 0 W in each
@@ -21,7 +25,7 @@ measurements to compute a power setpoint. Two properties of the signal shape thi
    seconds later. Averaging over 1 s barely helps and publishing one sample per second only
    subsamples the noise. Whether the wander is the charger or an artefact of the interim
    low-voltage reader (see `2026-09-22-low-voltage-cp-reader-design.md`) is not known. The right
-   filter depends on that and on what the inverter needs, so it lives on the server, where it can be
+   filter depends on that and on what the inverter needs, so it lives with the consumer, where it can be
    changed without reflashing. The board only publishes unfiltered samples.
 
 ## Message contract
@@ -36,7 +40,7 @@ the client is disconnected; the newest sample simply replaces an unsent older on
 
 | Field | Meaning |
 |---|---|
-| `t` | Board uptime in ms (`millis()`). There is no wall clock (no NTP), so the server stamps arrival time itself. |
+| `t` | Board uptime in ms (`millis()`). There is no wall clock (no NTP), so the consumer stamps arrival time itself. |
 | `freq`, `duty`, `adc` | The raw measurement, as in the CSV (`freq_hz`, `duty_pct`, `adc_raw`). |
 | `cp` | The CP classification, with the CSV `state` column's names: `NO_SIGNAL`, `DC_12V`, `PWM_VALID`, `OUT_OF_RANGE`. |
 | `state` | The pilot state the board presents: `A`, `B` or `C` (the CSV `commanded` column). |
@@ -124,5 +128,7 @@ queued behind it wait until the keepalive notices the dead link (about 15 s). Th
 - Any smoothing or averaging on the board.
 - Deciding whether the duty wander is real; a comparison against the charger's REST
   `SignaledCurrentLimit_vehicleif` can be done from the recorded stream later.
-- The inverter side and the server.
+- The inverter side, and choosing what consumes the stream. If the board ends up driving the
+  inverter directly, the smoothing and a Modbus client become firmware work in a later design; the
+  `setpoint_w` and `status` fields are what such code would need.
 - Authentication and TLS, as in the state-commands design.

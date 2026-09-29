@@ -250,12 +250,12 @@ void loop() {
 
   // Telemetry after the CSV row, so nothing new can precede it. A sample is
   // valid only if it is a usable offer whose power is a number.
-  const bool valid = state == CpState::PwmValid && !std::isnan(watts);
+  const bool valid = state == CpState::PwmValid && std::isfinite(watts);
   const SetpointStep setpoint = setpoint_step(
       g_setpoint, g_state == PilotState::C, valid, watts, now);
   g_setpoint = setpoint.state;
 
-  CpJsonFields fields;
+  CpJsonFields fields{};
   fields.t_ms = now;
   fields.freq_hz = sample.freq_hz;
   fields.duty_pct = sample.duty_pct;

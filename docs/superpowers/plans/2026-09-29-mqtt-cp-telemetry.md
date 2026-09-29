@@ -959,7 +959,7 @@ Expected: `~55–60 messages OK` and no traceback. `null` values parse as `None`
 
 - [ ] **Step 6: A dead broker does not touch sampling.** Stop Mosquitto for 30 s while a serial capture runs (`~/.platformio/penv/bin/python tools/cp_jitter.py capture ...` needs the reset script from earlier sessions, or use the monitor): the CSV rows must keep arriving every 200 ms with no gap. Restart the broker: `evsim/cp` resumes within about 5 s. `W` shows `cp replaced` small or zero.
 
-- [ ] **Step 7: Jitter.** Run a 60 s capture with the stream running and compare it against the earlier no-MQTT baseline: the frequency must stay exactly 1000 Hz. The duty spread is not an acceptance criterion (see the spec's Purpose).
+- [ ] **Step 7: Jitter.** In the build actually used on the bench, record about 60 s with the telemetry stream running and about 60 s with the broker stopped, in the same pilot state (C), plus a baseline capture from the merged master firmware without this feature if available. Compare the duty spread (standard deviation) and the lag-1 autocorrelation, as done for the state-command feature with `tools/cp_jitter.py` captures (`data/mqtt_baseline.csv` vs `data/mqtt_on.csv` were the previous ones). Note that in the low-voltage build (`env:esp32dev-lowvoltage`) the ADC sampling task (`src/cp_reader_adc.cpp`) is pinned to core 0 at priority 1, the same core and priority as the MQTT pump, and the reported frequency is hard-coded to 1000 Hz, so the frequency is a constant there and proves nothing. The duty spread between two captures of identical firmware already differs by about 1 point, so only a clear shift (several points) or a change in the autocorrelation structure is evidence of disturbance.
 
 ---
 

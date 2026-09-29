@@ -52,7 +52,9 @@ std::atomic<uint32_t> g_dropped_tx{0};
 std::atomic<uint32_t> g_errors{0};
 std::atomic<uint32_t> g_cp_replaced{0};  // unsent telemetry replaced by a newer sample
 
-// Runs in the esp-mqtt task. Must stay short and must not touch Serial.
+// Runs in the esp-mqtt task, or in the pump task when a publish or stop fails;
+// the DATA branch only ever runs in the esp-mqtt task. Must stay short and must
+// not touch Serial.
 esp_err_t on_event(esp_mqtt_event_handle_t event) {
   switch (event->event_id) {
     case MQTT_EVENT_CONNECTED: {

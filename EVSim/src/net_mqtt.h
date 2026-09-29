@@ -41,6 +41,8 @@ constexpr size_t kMqttCpCapacity = 256;
 // so the newest sample always wins and a slow network never queues stale data.
 // Never blocks. A message of kMqttCpCapacity characters or more is refused
 // rather than truncated. Nothing is sent while the client is disconnected.
+// The `cp replaced` counter shown by the W command counts samples lost to a
+// stalled pump; samples discarded while disconnected are not counted.
 void net_mqtt_publish_cp(const char *json);
 
 // Prints broker, connection flags and drop counters as '#' lines, for the 'W'

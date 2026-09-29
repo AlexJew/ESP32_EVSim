@@ -26,7 +26,7 @@ enum class SetpointStatus {
 
 struct SetpointState {
   bool have_valid;        // a valid sample was seen since entering state C
-  bool expired;           // the hold ran out; stays set until state C is left
+  bool expired;           // the hold ran out; stays set until a fresh valid sample or leaving state C
   float last_watts;       // the last valid power
   uint32_t last_valid_ms; // when it was seen
 };

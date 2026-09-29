@@ -57,7 +57,7 @@ void test_an_exact_pwm_gives_the_exact_duty_and_frequency(void) {
 
 void test_the_result_does_not_depend_on_where_the_window_starts(void) {
   for (int offset = 0; offset < 100; offset += 13) {
-    const AdcWindow w = feed_all(pwm(2000, 100, 25, offset));
+    const AdcWindow w = feed_all(pwm(2050, 100, 25, offset));  // not a multiple of the period
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 25.0f, adc_window_duty_pct(w));
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 1000.0f, adc_window_freq_hz(w, 100000.0f));
   }
@@ -144,17 +144,69 @@ void test_feeding_in_chunks_equals_feeding_at_once(void) {
 }
 
 void test_take_returns_the_counts_and_starts_a_window_at_the_same_level(void) {
-  AdcWindow w = feed_all(pwm(1050, 100, 25));  // ends in the middle of a period
-  const bool level = w.level_high;
+  // Ends in a HIGH phase (indices 1000..1009 are high), so a take() that reset
+  // the level would be caught.
+  AdcWindow w = feed_all(pwm(1010, 100, 25));
   const int raw = w.last_raw;
   const AdcWindow taken = adc_window_take(&w);
 
-  TEST_ASSERT_EQUAL_UINT32(1050, taken.samples);
+  TEST_ASSERT_EQUAL_UINT32(1010, taken.samples);
+  TEST_ASSERT_TRUE(taken.rises > 0);
+  TEST_ASSERT_TRUE(taken.level_high);
+  TEST_ASSERT_TRUE(w.level_high);
+  TEST_ASSERT_EQUAL_INT(taken.last_raw, w.last_raw);
+  TEST_ASSERT_EQUAL_INT(raw, w.last_raw);
   TEST_ASSERT_EQUAL_UINT32(0, w.samples);
+  TEST_ASSERT_EQUAL_UINT32(0, w.high);
   TEST_ASSERT_EQUAL_UINT32(0, w.edges);
   TEST_ASSERT_EQUAL_UINT32(0, w.rises);
-  TEST_ASSERT_EQUAL(level, w.level_high);
-  TEST_ASSERT_EQUAL_INT(raw, w.last_raw);
+  TEST_ASSERT_EQUAL_UINT32(0, w.first_rise);
+  TEST_ASSERT_EQUAL_UINT32(0, w.last_rise);
+  TEST_ASSERT_EQUAL_UINT32(0, w.high_at_first_rise);
+  TEST_ASSERT_EQUAL_UINT32(0, w.high_at_last_rise);
+
+  // The high phase continues (positions 10..24), then goes low: no rise, one fall.
+  const std::vector<uint16_t> more = pwm(30, 100, 25, 10);
+  adc_window_feed(&w, more.data(), more.size(), kAdcLowThreshold, kAdcHighThreshold);
+  TEST_ASSERT_EQUAL_UINT32(0, w.rises);
+  TEST_ASSERT_EQUAL_UINT32(1, w.edges);
+}
+
+void test_a_rising_edge_right_after_a_take_is_seen_at_index_zero(void) {
+  AdcWindow w = feed_all(pwm(1050, 100, 25));  // ends in a low phase
+  adc_window_take(&w);
+  adc_window_feed(&w, &kHigh, 1, kAdcLowThreshold, kAdcHighThreshold);
+  TEST_ASSERT_EQUAL_UINT32(1, w.rises);
+  TEST_ASSERT_EQUAL_UINT32(0, w.first_rise);
+  TEST_ASSERT_EQUAL_UINT32(1, w.edges);
+}
+
+void test_swapping_pairs_exchanges_each_adjacent_pair(void) {
+  uint16_t v[4] = {1, 2, 3, 4};
+  adc_swap_pairs(v, 4);
+  TEST_ASSERT_EQUAL_UINT16(2, v[0]);
+  TEST_ASSERT_EQUAL_UINT16(1, v[1]);
+  TEST_ASSERT_EQUAL_UINT16(4, v[2]);
+  TEST_ASSERT_EQUAL_UINT16(3, v[3]);
+}
+
+void test_swapping_an_odd_count_leaves_the_trailing_sample(void) {
+  uint16_t v[3] = {1, 2, 3};
+  adc_swap_pairs(v, 3);
+  TEST_ASSERT_EQUAL_UINT16(2, v[0]);
+  TEST_ASSERT_EQUAL_UINT16(1, v[1]);
+  TEST_ASSERT_EQUAL_UINT16(3, v[2]);
+}
+
+void test_swapping_null_or_fewer_than_two_samples_is_harmless(void) {
+  adc_swap_pairs(nullptr, 4);
+  uint16_t v[2] = {7, 8};
+  adc_swap_pairs(v, 0);
+  TEST_ASSERT_EQUAL_UINT16(7, v[0]);
+  TEST_ASSERT_EQUAL_UINT16(8, v[1]);
+  adc_swap_pairs(v, 1);
+  TEST_ASSERT_EQUAL_UINT16(7, v[0]);
+  TEST_ASSERT_EQUAL_UINT16(8, v[1]);
 }
 
 void test_an_empty_window_reports_its_starting_level(void) {
@@ -187,6 +239,10 @@ int main(int, char **) {
   RUN_TEST(test_a_single_edge_has_an_unknown_frequency);
   RUN_TEST(test_feeding_in_chunks_equals_feeding_at_once);
   RUN_TEST(test_take_returns_the_counts_and_starts_a_window_at_the_same_level);
+  RUN_TEST(test_a_rising_edge_right_after_a_take_is_seen_at_index_zero);
+  RUN_TEST(test_swapping_pairs_exchanges_each_adjacent_pair);
+  RUN_TEST(test_swapping_an_odd_count_leaves_the_trailing_sample);
+  RUN_TEST(test_swapping_null_or_fewer_than_two_samples_is_harmless);
   RUN_TEST(test_an_empty_window_reports_its_starting_level);
   RUN_TEST(test_feeding_nothing_or_null_is_harmless);
   return UNITY_END();

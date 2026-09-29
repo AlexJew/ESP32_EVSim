@@ -8,6 +8,17 @@ AdcWindow adc_window_init(bool level_high) {
   return w;
 }
 
+void adc_swap_pairs(uint16_t *raw, size_t n) {
+  if (raw == nullptr) {
+    return;
+  }
+  for (size_t i = 0; i + 1 < n; i += 2) {
+    const uint16_t first = raw[i];
+    raw[i] = raw[i + 1];
+    raw[i + 1] = first;
+  }
+}
+
 void adc_window_feed(AdcWindow *w, const uint16_t *raw, size_t n, int low_thresh,
                      int high_thresh) {
   if (w == nullptr || raw == nullptr) {

@@ -200,7 +200,8 @@ points; random dither added nothing on top.
 **Design now.** The I2S built-in ADC mode samples GPIO35 at a fixed rate (~99.3 kHz) into
 DMA buffers, and the duty and frequency are computed from sample counts
 (`lib/cp_adc_level/cp_adc_window`): the duty over whole PWM periods (first to last rising
-edge), the frequency from the same edge indices and the sample rate calibrated against the
-system clock. On the bench the error fell to 0.37 points (range 22.9–24.1 %). `freq_hz` is
+edge), the frequency from the same edge indices and the constant sample rate of the I2S
+clock (99 328 Hz, from the same crystal as the system timer). The I2S ADC-mode DMA delivers
+adjacent samples in swapped order, so each buffer's pairs are swapped before counting. On the bench the error fell to 0.37 points (range 22.9–24.1 %). `freq_hz` is
 now measured, no longer the nominal 1000 Hz, and a window with a single edge has an
 unknown frequency (reported as 0), which the classifier treats as out of range.

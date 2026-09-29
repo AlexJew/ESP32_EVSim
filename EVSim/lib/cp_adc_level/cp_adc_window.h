@@ -32,6 +32,13 @@ struct AdcWindow {
 // An empty window that starts at `level_high`.
 AdcWindow adc_window_init(bool level_high);
 
+// The I2S ADC-mode DMA delivers adjacent samples in swapped order (each pair
+// arrives as [second, first]). Call this on every buffer before adc_window_feed():
+// otherwise an edge inside a pair produces false extra transitions. Swaps
+// raw[2k] and raw[2k+1] for every complete pair; a trailing odd sample is left
+// alone; a null pointer or n < 2 does nothing.
+void adc_swap_pairs(uint16_t *raw, size_t n);
+
 // Feeds `n` raw 12-bit ADC values (0..4095), applying the hysteresis of
 // cp_adc_level_high(). A null `w` or `raw` is ignored.
 void adc_window_feed(AdcWindow *w, const uint16_t *raw, size_t n, int low_thresh,

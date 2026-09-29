@@ -15,14 +15,13 @@
 
 #include <driver/adc.h>
 #include <driver/i2s.h>
-#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #include "cp_adc_level.h"
 #include "cp_adc_window.h"
 
-// Set to 1 (build flag -DCP_ADC_DEBUG=1) to print the measured sample rate once a second.
+// Set to 1 (build flag -DCP_ADC_DEBUG=1) to print the sample rate measured against micros() once a second.
 #ifndef CP_ADC_DEBUG
 #define CP_ADC_DEBUG 0
 #endif
@@ -33,21 +32,18 @@ constexpr int kSampleRateHz = 100000;  // requested from the I2S clock
 constexpr int kDmaBufCount = 8;
 constexpr int kDmaBufLen = 512;  // samples per DMA buffer (~5 ms)
 
-// What the I2S clock really delivers for that request: its dividers cannot make
-// exactly 100 kHz, and the board measured 99 327-99 328 samples/s. Used until
-// the rate has been measured against the system clock.
-constexpr float kInitialRateHz = 99328.0f;
-constexpr int64_t kCalibrateAfterUs = 5000000;
+// The I2S clock dividers cannot make exactly the 100 kHz requested. The rate
+// they give, 99 328 Hz, was measured on the board (99 327-99 328 samples/s in
+// one-second windows). It comes from the same crystal as the system timer, so it
+// does not drift. A runtime calibration against the system clock was tried and
+// removed: DMA buffers are lost while WiFi starts, which biased it low by ~0.3 %
+// for a minute.
+constexpr float kSampleRateActualHz = 99328.0f;
 
 // The window is written by the DMA task and taken by cp_reader_sample() under
 // one spinlock, held only for one buffer's worth of counting or one copy.
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 AdcWindow g_window;
-int64_t g_first_chunk_us = 0;  // arrival time of the first DMA buffer, 0 until then
-int64_t g_last_chunk_us = 0;   // arrival time of the latest one
-uint64_t g_counted = 0;        // samples in all buffers after the first
-
-float g_rate_hz = kInitialRateHz;  // only cp_reader_sample() touches it
 
 // Blocks until the DMA has filled a buffer, then counts it.
 void cp_adc_dma_task(void *) {
@@ -62,16 +58,13 @@ void cp_adc_dma_task(void *) {
     for (size_t i = 0; i < n; i++) {
       buf[i] &= 0x0FFF;  // the upper 4 bits carry the channel number
     }
-    const int64_t arrived_us = esp_timer_get_time();
+    // The I2S ADC-mode DMA delivers adjacent samples in swapped order; without
+    // this, an edge inside a pair made false transitions and the measured
+    // frequency read ~1500 Hz instead of 1000 Hz.
+    adc_swap_pairs(buf, n);
 
     portENTER_CRITICAL(&g_mux);
     adc_window_feed(&g_window, buf, n, kAdcLowThreshold, kAdcHighThreshold);
-    if (g_first_chunk_us == 0) {
-      g_first_chunk_us = arrived_us;  // its samples predate this instant: count from the next
-    } else {
-      g_counted += n;
-    }
-    g_last_chunk_us = arrived_us;
     portEXIT_CRITICAL(&g_mux);
   }
 }
@@ -101,13 +94,17 @@ void cp_reader_begin() {
   cfg.use_apll = false;
 
   esp_err_t err = i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr);
+  const bool installed = (err == ESP_OK);
   if (err == ESP_OK) err = i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_7);  // GPIO35
-  if (err == ESP_OK) err = adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_12);  // 11 dB renamed 12 dB in IDF 5; same range
+  if (err == ESP_OK) err = adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_12);  // ADC_ATTEN_DB_11 is a deprecated alias of ADC_ATTEN_DB_12 (same value) in this framework
   if (err == ESP_OK) err = i2s_adc_enable(I2S_NUM_0);
   if (err != ESP_OK) {
     // No value is ever invented for an invalid state: the window stays empty, so
     // cp_reader_sample() reports a static line forever rather than a made-up reading.
     Serial.printf("# cp_reader_adc: I2S ADC setup failed (esp_err %d)\n", static_cast<int>(err));
+    if (installed) {
+      i2s_driver_uninstall(I2S_NUM_0);
+    }
     return;
   }
 
@@ -121,22 +118,26 @@ void cp_reader_begin() {
 CpSample cp_reader_sample() {
   portENTER_CRITICAL(&g_mux);
   const AdcWindow w = adc_window_take(&g_window);
-  const uint64_t counted = g_counted;
-  const int64_t span_us = g_last_chunk_us - g_first_chunk_us;
   portEXIT_CRITICAL(&g_mux);
 
-  // Measure the real sample rate against the system clock once there is enough
-  // data; before that the rate measured on the bench stands in.
-  if (span_us >= kCalibrateAfterUs) {
-    g_rate_hz = static_cast<float>(static_cast<double>(counted) * 1e6 /
-                                   static_cast<double>(span_us));
-  }
-
 #if CP_ADC_DEBUG
+  // sample() is called every 200 ms: every 5th call, print the rate seen against micros().
+  static uint64_t total_samples = 0;
+  static uint32_t last_print_us = 0;
   static int calls = 0;
-  if (++calls % 5 == 0) {  // sample() is called every 200 ms, so once per second
-    Serial.printf("# cp_adc: sample rate %.1f Hz (%s)\n", static_cast<double>(g_rate_hz),
-                  span_us >= kCalibrateAfterUs ? "measured" : "assumed");
+  if (calls == 0) {
+    last_print_us = micros();  // the first interval starts at the first call
+  }
+  total_samples += w.samples;
+  if (++calls % 5 == 0) {
+    const uint32_t now_us = micros();
+    const uint32_t elapsed_us = now_us - last_print_us;
+    if (elapsed_us != 0) {
+      Serial.printf("# cp_adc: %.1f samples/s (assumed 99328)\n",
+                    static_cast<double>(total_samples) * 1e6 / static_cast<double>(elapsed_us));
+    }
+    last_print_us = now_us;
+    total_samples = 0;
   }
 #endif
 
@@ -144,8 +145,8 @@ CpSample cp_reader_sample() {
   s.edges = w.edges;
   s.level_high = w.level_high;
   s.adc_raw = w.last_raw;
-  s.window_us = static_cast<uint32_t>(static_cast<double>(w.samples) * 1e6 / g_rate_hz);
+  s.window_us = static_cast<uint32_t>(static_cast<double>(w.samples) * 1e6 / kSampleRateActualHz);
   s.duty_pct = adc_window_duty_pct(w);
-  s.freq_hz = adc_window_freq_hz(w, g_rate_hz);
+  s.freq_hz = adc_window_freq_hz(w, kSampleRateActualHz);
   return s;
 }

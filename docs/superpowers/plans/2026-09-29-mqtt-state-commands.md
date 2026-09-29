@@ -948,7 +948,9 @@ Expected: the CSV shows no gap larger than the usual 200 ms; the board ends in a
 
 Command `B` then `C`. Stop Mosquitto (Ctrl-C in terminal 1). Expected: the CSV continues without a gap and `commanded` stays `C` throughout; `W` reports `not connected`. Restart Mosquitto. Expected within about 5 s: `evsim/status online` and `evsim/state C` (retained). While the broker is down, also send `A` on the serial monitor, then restart the broker: `evsim/state` must read `A` — the actual state — not a stale `C`.
 
-Also confirm the last-will: with the board connected, unplug its USB power; about 15 s later the subscriber shows `evsim/status offline`.
+Also confirm the last-will: with the board connected, unplug its USB power, and separately (second scenario) turn the WLAN access point off; in both cases about 15 s later the subscriber shows `evsim/status offline`.
+
+Stale-outbox check (WiFi stays up): block the broker with a firewall rule instead of Ctrl-C, because Ctrl-C closes the socket at once and the client notices immediately. Block TCP 1883 from the board to 192.168.21.137 with your firewall of choice (on macOS, `pfctl` rules work, but the exact syntax is left to you). While blocked, change the state twice (e.g. `B` then `C`) around the time the disconnect is detected (up to about 20 s of keepalive). Unblock, wait for the reconnect, and check that the retained `evsim/state` equals the state the board presents (`commanded` in the CSV).
 
 - [ ] **Step 8: Jitter — does MQTT disturb CP sampling?**
 
@@ -959,7 +961,7 @@ git worktree add --detach ../evsim-baseline 175dcff
 cd ../evsim-baseline/EVSim && ~/.platformio/penv/bin/pio run -e esp32dev-lowvoltage -t upload
 ```
 
-(Use the environment you normally flash.) Put the charger in the same limit and the board in state C for every capture, start each capture a couple of seconds after boot (the tool drops the first window), then from the repository root:
+(Use the environment you normally flash; for this capture use `esp32dev-lowvoltage` specifically, because the `cp_adc` sampler task shares core 0 with the pump task. If it fails, try `config.task_prio` or moving the pump to core 1 before anything else.) Put the charger in the same limit and the board in state C for every capture, start each capture a couple of seconds after boot (the tool drops the first window), then from the repository root:
 
 ```bash
 ~/.platformio/penv/bin/python tools/cp_jitter.py capture --out data/mqtt_baseline.csv --seconds 60

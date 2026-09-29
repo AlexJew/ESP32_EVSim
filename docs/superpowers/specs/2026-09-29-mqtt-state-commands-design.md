@@ -41,7 +41,9 @@ Prefix `evsim/`. All payloads are plain ASCII, no JSON.
    `memory/evsim-open-questions.md`.
 4. **On every (re)connect** the board publishes `online` on `evsim/status` and its current state
    on `evsim/state`, so a late subscriber learns the state from the retained message.
-5. **Every command gets a reply** on `evsim/reply`, accepted or refused. Serial keeps working
+5. **Every command that reaches `handle_command()` gets a reply** on `evsim/reply`, accepted or
+   refused, best-effort: the reply is dropped while the client is disconnected or the TX queue
+   is full, and messages rejected by the acceptance filter get none. Serial keeps working
    alongside MQTT and both go through the same validation, so A → C is refused on both.
 6. The state after reset is always A, as today.
 

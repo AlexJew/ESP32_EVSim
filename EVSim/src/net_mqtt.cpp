@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -38,10 +39,12 @@ QueueHandle_t g_tx = nullptr;
 // counters do not tear.
 std::atomic<bool> g_started{false};    // pump task
 std::atomic<bool> g_connected{false};  // esp-mqtt task
+std::atomic<bool> g_session_lost{false};  // esp-mqtt task sets, pump clears
 std::atomic<uint8_t> g_last_state{0};  // a PilotState as int; A after reset
 std::atomic<uint32_t> g_ignored_rx{0};
 std::atomic<uint32_t> g_dropped_rx{0};
 std::atomic<uint32_t> g_dropped_tx{0};
+std::atomic<uint32_t> g_errors{0};
 
 // Runs in the esp-mqtt task. Must stay short and must not touch Serial.
 esp_err_t on_event(esp_mqtt_event_handle_t event) {
@@ -56,7 +59,12 @@ esp_err_t on_event(esp_mqtt_event_handle_t event) {
       break;
     }
     case MQTT_EVENT_DISCONNECTED:
-      g_connected = false;
+      if (g_connected.exchange(false)) {
+        g_session_lost = true;
+      }
+      break;
+    case MQTT_EVENT_ERROR:
+      g_errors++;
       break;
     case MQTT_EVENT_DATA: {
       const bool has_nul =
@@ -99,6 +107,21 @@ void pump_task(void *) {
       }
     }
 
+    // An internal disconnect with WiFi still up makes esp-mqtt reconnect by
+    // itself and re-send its outbox (queued and unacknowledged QoS 1 items
+    // younger than 30 s) AFTER our CONNECTED handler published the current
+    // state, so a stale state/reply could overwrite the retained value.
+    // stop() clears the outbox; the branch below then restarts the client.
+    // Only a session that was really connected sets the flag, so failed
+    // connection attempts do not cause restart churn. The flag is cleared on
+    // every pass even when g_started is false, so a DISCONNECTED raised by
+    // this task's own stop() does not trigger a second stop after the next
+    // start.
+    if (g_session_lost.exchange(false) && g_started) {
+      esp_mqtt_client_stop(g_client);
+      g_started = false;
+    }
+
     const bool wifi_up = WiFi.status() == WL_CONNECTED;
     if (wifi_up && !g_started) {
       if (esp_mqtt_client_start(g_client) == ESP_OK) {
@@ -127,6 +150,16 @@ void push_tx(TxKind kind, const char *text) {
 }  // namespace
 
 void net_mqtt_begin() {
+  // esp-mqtt and esp-tls log errors from their own tasks on UART0, unprefixed,
+  // which would split CSV rows. Silence them; connection problems remain
+  // visible through the W status (state and error counter).
+  static const char *const kNoisyTags[] = {
+      "MQTT_CLIENT", "OUTBOX",  "TRANSPORT_BASE",  "TRANSPORT",
+      "TRANSPORT_WS", "transport", "esp-tls", "esp-tls-mbedtls"};
+  for (const char *tag : kNoisyTags) {
+    esp_log_level_set(tag, ESP_LOG_NONE);
+  }
+
   g_rx = xQueueCreate(kRxDepth, sizeof(RxItem));
   g_tx = xQueueCreate(kTxDepth, sizeof(TxItem));
 
@@ -144,7 +177,7 @@ void net_mqtt_begin() {
   g_client = esp_mqtt_client_init(&config);
 
   if (g_rx == nullptr || g_tx == nullptr || g_client == nullptr ||
-      xTaskCreatePinnedToCore(pump_task, "mqtt_pump", 4096, nullptr, 1, nullptr,
+      xTaskCreatePinnedToCore(pump_task, "mqtt_pump", 6144, nullptr, 1, nullptr,
                               0) != pdPASS) {
     Serial.println("# net_mqtt: init failed -- MQTT disabled");
     g_client = nullptr;
@@ -190,5 +223,7 @@ void net_mqtt_print_status() {
   Serial.print(", dropped rx ");
   Serial.print(g_dropped_rx.load());
   Serial.print(", dropped tx ");
-  Serial.println(g_dropped_tx.load());
+  Serial.print(g_dropped_tx.load());
+  Serial.print(", errors ");
+  Serial.println(g_errors.load());
 }

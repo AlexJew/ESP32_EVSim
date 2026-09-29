@@ -32,10 +32,15 @@ constexpr int kSampleRateHz = 100000;  // requested from the I2S clock
 constexpr int kDmaBufCount = 8;
 constexpr int kDmaBufLen = 512;  // samples per DMA buffer (~5 ms)
 
-// The I2S clock dividers cannot make exactly the 100 kHz requested. The rate
-// they give is 99 217.7 Hz (+/- 1.6), the mean of 325 one-second windows measured
-// on the board. It comes from the same crystal as the system timer, so it does
-// not drift. Single one-second windows read 98 816 or 99 328 samples because the
+// The I2S ADC mode delivers 99 217.7 Hz for the 100 kHz request (measured with
+// arduino-esp32 2.0.17 / ESP-IDF 4.4): the mean of 325 one-second windows on the
+// board. The +/- 1.6 Hz is the one-buffer quantisation of the 325 s total, with no
+// buffers dropped in that run. A 1 % error in this constant would move freq_hz by
+// about 10 Hz, well inside the classifier's 900-1100 Hz gate, and would not affect
+// the duty at all. The value belongs to this framework version: if the framework
+// is upgraded, re-measure it (build with -DCP_ADC_DEBUG=1 and average the printed
+// rate over several minutes). It comes from the same crystal as the system timer,
+// so it does not drift. Single one-second windows read 98 816 or 99 328 samples because the
 // DMA delivers whole 512-sample buffers (193 or 194 per second), so only a long
 // mean measures the rate. A runtime calibration against the system clock was
 // tried and removed: DMA buffers are lost while WiFi starts at boot, which
@@ -98,7 +103,8 @@ void cp_reader_begin() {
   esp_err_t err = i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr);
   const bool installed = (err == ESP_OK);
   if (err == ESP_OK) err = i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_7);  // GPIO35
-  if (err == ESP_OK) err = adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_12);  // ADC_ATTEN_DB_11 is a deprecated alias of ADC_ATTEN_DB_12 (same value) in this framework
+  // ADC_ATTEN_DB_11 is a deprecated alias of ADC_ATTEN_DB_12 (same value) in this framework.
+  if (err == ESP_OK) err = adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_12);
   if (err == ESP_OK) err = i2s_adc_enable(I2S_NUM_0);
   if (err != ESP_OK) {
     // No value is ever invented for an invalid state: the window stays empty, so
@@ -129,18 +135,19 @@ CpSample cp_reader_sample() {
   static uint64_t total_samples = 0;
   static uint32_t last_print_us = 0;
   static int calls = 0;
-  if (calls == 0) {
-    last_print_us = micros();  // the first interval starts at the first call
-  }
+  static bool primed = false;
   total_samples += w.samples;
   if (++calls % 5 == 0) {
     const uint32_t now_us = micros();
     const uint32_t elapsed_us = now_us - last_print_us;
-    if (elapsed_us != 0) {
+    // The first window holds samples gathered since boot, so its interval is
+    // ignored: the first 5th call only records the time and resets the total.
+    if (primed && elapsed_us != 0) {
       Serial.printf("# cp_adc: %.1f samples/s (assumed %.1f)\n",
                     static_cast<double>(total_samples) * 1e6 / static_cast<double>(elapsed_us),
                     static_cast<double>(kSampleRateActualHz));
     }
+    primed = true;
     last_print_us = now_us;
     total_samples = 0;
   }

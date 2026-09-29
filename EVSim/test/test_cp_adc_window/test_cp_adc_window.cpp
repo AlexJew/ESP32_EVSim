@@ -64,8 +64,8 @@ void test_the_result_does_not_depend_on_where_the_window_starts(void) {
 }
 
 void test_a_sample_rate_that_is_not_a_multiple_of_the_pwm_still_measures_well(void) {
-  // 99328 Hz sampling of a 1 kHz, 23.33 % PWM over 200 ms (19866 samples).
-  const double fs = 99328.0, duty = 0.2333;
+  // 99217.7 Hz sampling of a 1 kHz, 23.33 % PWM over 200 ms (19866 samples).
+  const double fs = 99217.7, duty = 0.2333;
   std::vector<uint16_t> v(19866);
   for (size_t i = 0; i < v.size(); i++) {
     const double phase = fmod(static_cast<double>(i) * 1000.0 / fs, 1.0);
@@ -112,6 +112,15 @@ void test_a_static_stretch_before_the_pwm_does_not_dilute_the_duty(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1000.0f, adc_window_freq_hz(w, 100000.0f));
 }
 
+void test_a_static_stretch_after_the_pwm_does_not_dilute_the_duty(void) {
+  // The charger-off direction: 20 periods of a 25 % PWM, then 1000 samples of steady low.
+  std::vector<uint16_t> v = pwm(2000, 100, 25);
+  v.insert(v.end(), 1000, kLow);
+  const AdcWindow w = feed_all(v);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 25.0f, adc_window_duty_pct(w));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1000.0f, adc_window_freq_hz(w, 100000.0f));
+}
+
 void test_a_single_edge_has_an_unknown_frequency(void) {
   std::vector<uint16_t> v(500, kLow);
   v.insert(v.end(), 500, kHigh);
@@ -120,6 +129,16 @@ void test_a_single_edge_has_an_unknown_frequency(void) {
   TEST_ASSERT_EQUAL_UINT32(1, w.rises);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, adc_window_freq_hz(w, 100000.0f));
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 50.0f, adc_window_duty_pct(w));  // the whole-window fraction
+}
+
+void test_a_window_holding_only_a_final_falling_edge_has_an_unknown_frequency(void) {
+  std::vector<uint16_t> v(500, kHigh);
+  v.insert(v.end(), 500, kLow);
+  AdcWindow w = adc_window_init(true);
+  adc_window_feed(&w, v.data(), v.size(), kAdcLowThreshold, kAdcHighThreshold);
+  TEST_ASSERT_EQUAL_UINT32(0, w.rises);
+  TEST_ASSERT_EQUAL_UINT32(1, w.edges);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, adc_window_freq_hz(w, 100000.0f));
 }
 
 void test_feeding_in_chunks_equals_feeding_at_once(void) {
@@ -191,11 +210,13 @@ void test_swapping_pairs_exchanges_each_adjacent_pair(void) {
 }
 
 void test_swapping_an_odd_count_leaves_the_trailing_sample(void) {
-  uint16_t v[3] = {1, 2, 3};
+  // A fourth value sits past n: an off-by-one write would change it.
+  uint16_t v[4] = {1, 2, 3, 0xBEEF};
   adc_swap_pairs(v, 3);
   TEST_ASSERT_EQUAL_UINT16(2, v[0]);
   TEST_ASSERT_EQUAL_UINT16(1, v[1]);
   TEST_ASSERT_EQUAL_UINT16(3, v[2]);
+  TEST_ASSERT_EQUAL_UINT16(0xBEEF, v[3]);
 }
 
 void test_swapping_null_or_fewer_than_two_samples_is_harmless(void) {
@@ -207,6 +228,29 @@ void test_swapping_null_or_fewer_than_two_samples_is_harmless(void) {
   adc_swap_pairs(v, 1);
   TEST_ASSERT_EQUAL_UINT16(7, v[0]);
   TEST_ASSERT_EQUAL_UINT16(8, v[1]);
+}
+
+void test_the_pair_swap_undoes_what_the_dma_does_to_a_clean_signal(void) {
+  const std::vector<uint16_t> clean = pwm(2000, 100, 25);
+  std::vector<uint16_t> delivered = clean;  // what the I2S ADC-mode DMA hands over
+  for (size_t i = 0; i + 1 < delivered.size(); i += 2) {
+    const uint16_t t = delivered[i];
+    delivered[i] = delivered[i + 1];
+    delivered[i + 1] = t;
+  }
+  const AdcWindow good = feed_all(clean);
+
+  // Fed as delivered, an edge inside a pair makes false transitions.
+  const AdcWindow raw = feed_all(delivered);
+  TEST_ASSERT_TRUE(raw.rises != good.rises);
+  TEST_ASSERT_TRUE(fabsf(adc_window_freq_hz(raw, 100000.0f) - 1000.0f) > 50.0f);
+
+  adc_swap_pairs(delivered.data(), delivered.size());
+  const AdcWindow fixed = feed_all(delivered);
+  TEST_ASSERT_EQUAL_UINT32(good.rises, fixed.rises);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, adc_window_duty_pct(good), adc_window_duty_pct(fixed));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, adc_window_freq_hz(good, 100000.0f),
+                           adc_window_freq_hz(fixed, 100000.0f));
 }
 
 void test_an_empty_window_reports_its_starting_level(void) {
@@ -236,13 +280,16 @@ int main(int, char **) {
   RUN_TEST(test_noise_inside_the_plateaus_creates_no_edges);
   RUN_TEST(test_a_dip_into_the_hysteresis_band_does_not_flip_the_level);
   RUN_TEST(test_a_static_stretch_before_the_pwm_does_not_dilute_the_duty);
+  RUN_TEST(test_a_static_stretch_after_the_pwm_does_not_dilute_the_duty);
   RUN_TEST(test_a_single_edge_has_an_unknown_frequency);
+  RUN_TEST(test_a_window_holding_only_a_final_falling_edge_has_an_unknown_frequency);
   RUN_TEST(test_feeding_in_chunks_equals_feeding_at_once);
   RUN_TEST(test_take_returns_the_counts_and_starts_a_window_at_the_same_level);
   RUN_TEST(test_a_rising_edge_right_after_a_take_is_seen_at_index_zero);
   RUN_TEST(test_swapping_pairs_exchanges_each_adjacent_pair);
   RUN_TEST(test_swapping_an_odd_count_leaves_the_trailing_sample);
   RUN_TEST(test_swapping_null_or_fewer_than_two_samples_is_harmless);
+  RUN_TEST(test_the_pair_swap_undoes_what_the_dma_does_to_a_clean_signal);
   RUN_TEST(test_an_empty_window_reports_its_starting_level);
   RUN_TEST(test_feeding_nothing_or_null_is_harmless);
   return UNITY_END();

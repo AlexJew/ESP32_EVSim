@@ -181,3 +181,26 @@ host-testable. Flash `-e esp32dev-lowvoltage` and run alongside `tools/charger_p
    setpoints, accepting coarser accuracy than the ISR path per the accepted limitation above.
 3. Pilot state transitions (`A`/`B`/`C` over serial, via the unmodified `pilot_state`/
    `pilot_driver`) still work normally alongside this reader.
+
+## Addendum (2026-09-29): the sampler is DMA-based
+
+The original sampler read the ADC in bursts of 20 and rested one FreeRTOS tick between
+bursts, and this document's "Sampling rate and accuracy" section argued the duty stays an
+unbiased estimate. On the bench that was wrong in practice. Against the charger's own REST
+value (a constant 14.0 A, so 23.33 % duty), the duty read by that sampler had an error
+(RMSE) of 11–13 points, ranging 12.6–51.6 %, wandering over several seconds. The mean was
+right; individual 200 ms readings were not.
+
+**Cause.** `analogRead()` takes ~100 µs, so a burst lasted ~2 ms and the burst-plus-rest
+cycle was locked to the 1 ms tick. That is nearly synchronous with the charger's 1 kHz PWM,
+so where each burst landed in the PWM period, and therefore the duty estimate, depended on
+the slowly slipping phase between two clocks. A sampler with no rest gap reached 1.8
+points; random dither added nothing on top.
+
+**Design now.** The I2S built-in ADC mode samples GPIO35 at a fixed rate (~99.3 kHz) into
+DMA buffers, and the duty and frequency are computed from sample counts
+(`lib/cp_adc_level/cp_adc_window`): the duty over whole PWM periods (first to last rising
+edge), the frequency from the same edge indices and the sample rate calibrated against the
+system clock. On the bench the error fell to 0.37 points (range 22.9–24.1 %). `freq_hz` is
+now measured, no longer the nominal 1000 Hz, and a window with a single edge has an
+unknown frequency (reported as 0), which the classifier treats as out of range.

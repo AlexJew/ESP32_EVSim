@@ -3,72 +3,76 @@
 // inside the ESP32's undefined digital-input band. See
 // docs/superpowers/specs/2026-09-22-low-voltage-cp-reader-design.md.
 //
-// A FreeRTOS task samples the ADC, timestamps each sample, and decides the
-// level via cp_adc_level_high()'s hysteresis, accumulating high-time and
-// window time the same way cp_reader_isr.cpp's ISR does -- so
-// cp_reader_sample() and CpSample need no changes either way.
+// The I2S peripheral's built-in ADC mode samples GPIO35 at a fixed rate into DMA
+// buffers, with no CPU involvement. One task counts each buffer into a window
+// (lib/cp_adc_level/cp_adc_window); cp_reader_sample() takes the window and turns
+// its counts into duty and frequency. Time comes from the sample count, so a
+// task delayed by the WiFi stack cannot distort a measurement. The earlier
+// sampler read the ADC in bursts and rested one FreeRTOS tick between them; that
+// cycle was locked to the 1 ms tick, nearly synchronous with the 1 kHz PWM, and
+// made the duty wander by several points (see the design spec's addendum).
 #include "cp_reader.h"
 
+#include <driver/adc.h>
+#include <driver/i2s.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #include "cp_adc_level.h"
+#include "cp_adc_window.h"
+
+// Set to 1 (build flag -DCP_ADC_DEBUG=1) to print the measured sample rate once a second.
+#ifndef CP_ADC_DEBUG
+#define CP_ADC_DEBUG 0
+#endif
 
 namespace {
 
-// Every this many samples the task rests for one tick so the core's idle
-// task still runs -- without it, a tight analogRead() loop can starve the
-// idle task and trigger an ESP32 task-watchdog reset.
-constexpr int kSamplesPerBurst = 20;
+constexpr int kSampleRateHz = 100000;  // requested from the I2S clock
+constexpr int kDmaBufCount = 8;
+constexpr int kDmaBufLen = 512;  // samples per DMA buffer (~5 ms)
 
-// This sampler's ~1 ms burst/rest cadence is comparable to CP's own ~1 ms
-// period, so edge counting across a rest gap cannot reliably measure
-// frequency -- a whole period can be swallowed within one gap and never
-// register as a transition. Duty stays an unbiased estimate regardless
-// (see the design spec's "Sampling rate and accuracy"), so frequency is
-// not computed from edge timing here. Report the protocol's known nominal
-// frequency whenever any transition was detected at all, which is what
-// cp_classify()'s validity gate actually needs -- confirmation that a
-// real CP signal is present, not a genuine frequency measurement.
-constexpr float kNominalCpFreqHz = 1000.0f;
+// What the I2S clock really delivers for that request: its dividers cannot make
+// exactly 100 kHz, and the board measured 99 327-99 328 samples/s. Used until
+// the rate has been measured against the system clock.
+constexpr float kInitialRateHz = 99328.0f;
+constexpr int64_t kCalibrateAfterUs = 5000000;
 
-// Written by the sampling task, read by cp_reader_sample() under the same
-// lock. Two tasks, not an ISR, so a portMUX_TYPE spinlock is the correct
-// primitive here -- noInterrupts()/interrupts() only guard against true ISRs.
+// The window is written by the DMA task and taken by cp_reader_sample() under
+// one spinlock, held only for one buffer's worth of counting or one copy.
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
+AdcWindow g_window;
+int64_t g_first_chunk_us = 0;  // arrival time of the first DMA buffer, 0 until then
+int64_t g_last_chunk_us = 0;   // arrival time of the latest one
+uint64_t g_counted = 0;        // samples in all buffers after the first
 
-uint32_t g_high_us = 0;
-uint32_t g_edges = 0;
-bool g_last_level_high = false;
-int g_last_raw = 0;
+float g_rate_hz = kInitialRateHz;  // only cp_reader_sample() touches it
 
-uint32_t g_window_start_us = 0;
-uint32_t g_last_sample_us = 0;
-
-void cp_adc_task(void *) {
+// Blocks until the DMA has filled a buffer, then counts it.
+void cp_adc_dma_task(void *) {
+  static uint16_t buf[kDmaBufLen];
   for (;;) {
-    for (int i = 0; i < kSamplesPerBurst; i++) {
-      const int raw = analogRead(kCpPin);
-      const uint32_t now = micros();
-
-      portENTER_CRITICAL(&g_mux);
-      const bool new_level =
-          cp_adc_level_high(raw, g_last_level_high, kAdcLowThreshold, kAdcHighThreshold);
-      // Attribute the elapsed time since the last sample to whichever level
-      // was active over it -- a sample-and-hold integration, not an edge
-      // timestamp, since the level is only known at discrete instants.
-      if (g_last_level_high) {
-        g_high_us += now - g_last_sample_us;  // unsigned wraparound is correct here
-      }
-      if (new_level != g_last_level_high) {
-        g_edges++;
-      }
-      g_last_level_high = new_level;
-      g_last_raw = raw;
-      g_last_sample_us = now;
-      portEXIT_CRITICAL(&g_mux);
+    size_t got = 0;
+    if (i2s_read(I2S_NUM_0, buf, sizeof buf, &got, portMAX_DELAY) != ESP_OK) {
+      vTaskDelay(1);  // never spin on a failing driver
+      continue;
     }
-    vTaskDelay(1);
+    const size_t n = got / sizeof(uint16_t);
+    for (size_t i = 0; i < n; i++) {
+      buf[i] &= 0x0FFF;  // the upper 4 bits carry the channel number
+    }
+    const int64_t arrived_us = esp_timer_get_time();
+
+    portENTER_CRITICAL(&g_mux);
+    adc_window_feed(&g_window, buf, n, kAdcLowThreshold, kAdcHighThreshold);
+    if (g_first_chunk_us == 0) {
+      g_first_chunk_us = arrived_us;  // its samples predate this instant: count from the next
+    } else {
+      g_counted += n;
+    }
+    g_last_chunk_us = arrived_us;
+    portEXIT_CRITICAL(&g_mux);
   }
 }
 
@@ -78,53 +82,70 @@ void cp_reader_begin() {
   pinMode(kCpPin, INPUT);
   analogSetPinAttenuation(kCpPin, ADC_11db);  // full 0-3.3V range
 
-  const uint32_t now = micros();
-  g_high_us = 0;
-  g_edges = 0;
-  g_last_raw = analogRead(kCpPin);
-  g_last_level_high =
-      cp_adc_level_high(g_last_raw, /*previous_level=*/false, kAdcLowThreshold, kAdcHighThreshold);
-  g_last_sample_us = now;
-  g_window_start_us = now;
+  // One conventional read to seed the level; after the I2S ADC starts, the
+  // Arduino analogRead() must not be used again.
+  const int raw = analogRead(kCpPin);
+  g_window = adc_window_init(cp_adc_level_high(raw, /*previous_level=*/false, kAdcLowThreshold,
+                                               kAdcHighThreshold));
+  g_window.last_raw = raw;
+
+  i2s_config_t cfg = {};
+  cfg.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN);
+  cfg.sample_rate = kSampleRateHz;
+  cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  cfg.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+  cfg.communication_format = I2S_COMM_FORMAT_STAND_MSB;
+  cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  cfg.dma_buf_count = kDmaBufCount;
+  cfg.dma_buf_len = kDmaBufLen;
+  cfg.use_apll = false;
+
+  esp_err_t err = i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr);
+  if (err == ESP_OK) err = i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_7);  // GPIO35
+  if (err == ESP_OK) err = adc1_config_channel_atten(ADC1_CHANNEL_7, ADC_ATTEN_DB_12);  // 11 dB renamed 12 dB in IDF 5; same range
+  if (err == ESP_OK) err = i2s_adc_enable(I2S_NUM_0);
+  if (err != ESP_OK) {
+    // No value is ever invented for an invalid state: the window stays empty, so
+    // cp_reader_sample() reports a static line forever rather than a made-up reading.
+    Serial.printf("# cp_reader_adc: I2S ADC setup failed (esp_err %d)\n", static_cast<int>(err));
+    return;
+  }
 
   const BaseType_t created =
-      xTaskCreatePinnedToCore(cp_adc_task, "cp_adc", 2048, nullptr, 1, nullptr, 0);
+      xTaskCreatePinnedToCore(cp_adc_dma_task, "cp_adc_dma", 3072, nullptr, 2, nullptr, 0);
   if (created != pdPASS) {
-    // No value is ever invented for an invalid state: leave the accumulators
-    // at zero, so cp_reader_sample() reports NO_SIGNAL forever rather than a
-    // made-up reading.
     Serial.println("# cp_reader_adc: task creation failed");
   }
 }
 
 CpSample cp_reader_sample() {
-  const uint32_t now = micros();
-
   portENTER_CRITICAL(&g_mux);
-  const uint32_t high_us = g_high_us;
-  const uint32_t edges = g_edges;
-  const bool level_high = g_last_level_high;
-  const int adc_raw = g_last_raw;
-  g_high_us = 0;
-  g_edges = 0;
+  const AdcWindow w = adc_window_take(&g_window);
+  const uint64_t counted = g_counted;
+  const int64_t span_us = g_last_chunk_us - g_first_chunk_us;
   portEXIT_CRITICAL(&g_mux);
 
-  const uint32_t window_us = now - g_window_start_us;
-  g_window_start_us = now;
-
-  CpSample s{};
-  s.edges = edges;
-  s.level_high = level_high;
-  s.window_us = window_us;
-  s.adc_raw = adc_raw;
-
-  if (edges == 0 || window_us == 0) {
-    s.duty_pct = level_high ? 100.0f : 0.0f;
-    s.freq_hz = 0.0f;
-    return s;
+  // Measure the real sample rate against the system clock once there is enough
+  // data; before that the rate measured on the bench stands in.
+  if (span_us >= kCalibrateAfterUs) {
+    g_rate_hz = static_cast<float>(static_cast<double>(counted) * 1e6 /
+                                   static_cast<double>(span_us));
   }
 
-  s.duty_pct = 100.0f * static_cast<float>(high_us) / static_cast<float>(window_us);
-  s.freq_hz = kNominalCpFreqHz;
+#if CP_ADC_DEBUG
+  static int calls = 0;
+  if (++calls % 5 == 0) {  // sample() is called every 200 ms, so once per second
+    Serial.printf("# cp_adc: sample rate %.1f Hz (%s)\n", static_cast<double>(g_rate_hz),
+                  span_us >= kCalibrateAfterUs ? "measured" : "assumed");
+  }
+#endif
+
+  CpSample s{};
+  s.edges = w.edges;
+  s.level_high = w.level_high;
+  s.adc_raw = w.last_raw;
+  s.window_us = static_cast<uint32_t>(static_cast<double>(w.samples) * 1e6 / g_rate_hz);
+  s.duty_pct = adc_window_duty_pct(w);
+  s.freq_hz = adc_window_freq_hz(w, g_rate_hz);
   return s;
 }

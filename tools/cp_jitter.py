@@ -100,10 +100,10 @@ def capture(args: argparse.Namespace) -> int:
         for row in rows:
             f.write(row + "\n")
 
-    valid = sum(1 for r in rows if ",PwmValid," in r)
-    print(f"# wrote {args.out}: {len(rows)} rows, {valid} PwmValid")
+    valid = sum(1 for r in rows if ",PWM_VALID," in r)
+    print(f"# wrote {args.out}: {len(rows)} rows, {valid} PWM_VALID")
     if valid == 0:
-        print("# WARNING: no PwmValid rows. Is the charger signalling, and is "
+        print("# WARNING: no PWM_VALID rows. Is the charger signalling, and is "
               "the board in state C?", file=sys.stderr)
     return 0
 
@@ -145,9 +145,9 @@ def collect_rows(ser, seconds: float) -> list[str]:
 
 def stats_for(path: str) -> dict[str, tuple[int, float, float]]:
     with open(path) as f:
-        rows = [r for r in csv.DictReader(f) if r.get("state") == "PwmValid"]
+        rows = [r for r in csv.DictReader(f) if r.get("state") == "PWM_VALID"]
     if not rows:
-        sys.exit(f"{path}: no PwmValid rows to analyse")
+        sys.exit(f"{path}: no PWM_VALID rows to analyse")
 
     out = {}
     for col in ("freq_hz", "duty_pct"):

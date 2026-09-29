@@ -41,7 +41,9 @@ Prefix `evsim/`. All payloads are plain ASCII, no JSON.
    `memory/evsim-open-questions.md`.
 4. **On every (re)connect** the board publishes `online` on `evsim/status` and its current state
    on `evsim/state`, so a late subscriber learns the state from the retained message.
-5. **Every command gets a reply** on `evsim/reply`, accepted or refused. Serial keeps working
+5. **Every command that reaches `handle_command()` gets a reply** on `evsim/reply`, accepted or
+   refused, best-effort: the reply is dropped while the client is disconnected or the TX queue
+   is full, and messages rejected by the acceptance filter get none. Serial keeps working
    alongside MQTT and both go through the same validation, so A → C is refused on both.
 6. The state after reset is always A, as today.
 
@@ -49,54 +51,70 @@ Prefix `evsim/`. All payloads are plain ASCII, no JSON.
 
 ### Client: ESP-IDF `esp-mqtt`
 
-The client is ESP-IDF's `esp-mqtt` (`mqtt_client.h`, shipped in the Arduino-ESP32 core the
-project already builds with; verified present for the `esp32` target). It runs in its own
-FreeRTOS task, so connecting, reconnecting and publishing never run on `loop()`. A synchronous
+The client is ESP-IDF's `esp-mqtt` (`#include <mqtt_client.h>`, shipped in the Arduino-ESP32
+core the project builds with; verified to link with no `platformio.ini` change). A synchronous
 client such as PubSubClient was rejected: a TCP connect to an unreachable broker (a laptop that
 is asleep, Mosquitto stopped) can stall `loop()` for seconds, which is the failure the WiFi
 design exists to prevent.
 
+esp-mqtt alone is not enough. Its header documents that `esp_mqtt_client_publish()` "might block
+for several seconds", and `esp_mqtt_client_enqueue()`, `_start()` and `_stop()` take the same
+client lock that the client's task holds while connecting. So **`loop()` never calls any
+`esp_mqtt_client_*` function.** Everything that touches the client runs in two tasks — esp-mqtt's
+own, and a small "pump" task pinned to core 0 that `net_mqtt_begin()` creates — and `loop()`
+talks to them only through two FreeRTOS queues, always with a timeout of 0.
+
 ### Components
 
-- **`lib/mqtt_proto`** — pure C++, natively unit-tested. Topic names built from the prefix;
-  payload parsing, reusing `pilot_parse_command()` so serial and MQTT accept identical text;
-  the rule that a retained message is not a command.
-- **`src/net_mqtt.{h,cpp}`** — wraps esp-mqtt, alongside `net_wifi`. Interface:
-  `net_mqtt_begin()`, `net_mqtt_poll()`, `net_mqtt_publish_state()`,
-  `net_mqtt_publish_reply()`.
-- **`src/mqtt_config.h`** — broker IP (never a hostname), port, prefix, client ID. Same pattern
-  as `wifi_config.h`.
+- **`lib/mqtt_proto`** — pure C++, natively unit-tested. `mqtt_rx_filter()` decides whether an
+  incoming message may become a command (not retained, non-empty, a single unfragmented chunk
+  shorter than 16 bytes, no NUL byte); `mqtt_sanitize()` copies untrusted bytes with everything
+  outside printable ASCII replaced by `?`, for echoing on serial. Payload *parsing* is not
+  duplicated: `pilot_parse_command()` is reused, so serial and MQTT accept identical text.
+- **`src/net_mqtt.{h,cpp}`** — wraps esp-mqtt. Interface: `net_mqtt_begin()`,
+  `net_mqtt_take_command()`, `net_mqtt_publish_state()`, `net_mqtt_publish_reply()`,
+  `net_mqtt_print_status()`.
+- **`src/mqtt_config.h`** — broker URI (an IP, never a hostname), client ID, the four topic
+  strings, keepalive and reconnect timing. Same pattern as `wifi_config.h`.
 - **`src/main.cpp`** — remains the only code that touches `g_state` and the GPIOs.
 
 ### Data flow
 
-1. The esp-mqtt task receives a message on `evsim/cmd/state`, drops it if retained, and pushes
-   the payload (at most 16 characters, like `kLineMax`) into a small FreeRTOS queue. It does
-   nothing else.
-2. `loop()` calls `net_mqtt_poll()`, which takes **at most one** command per pass — as
-   `poll_serial()` does — and calls the existing `handle_command()`.
-3. `handle_command()`'s replies go through one function. It always prints the `# ...` line on
-   serial, and also publishes on `evsim/reply` when the command came from MQTT.
-4. A successful state change publishes `evsim/state` whatever its source, so a serial command
-   is visible on the broker too.
+1. The esp-mqtt task receives a message on `evsim/cmd/state`, runs `mqtt_rx_filter()`, and on
+   `Accept` copies the payload into the RX queue (depth 4, 16 bytes each, `xQueueSend` timeout 0;
+   a full queue drops the message and counts it). It does nothing else.
+2. `loop()` calls `net_mqtt_take_command()` once per pass (`xQueueReceive`, timeout 0) and passes
+   any command to the existing `handle_command()`.
+3. `handle_command()` builds each reply as one string and sends it through one function: it
+   always prints the `# ...` line on serial, and for a command that came from MQTT it also calls
+   `net_mqtt_publish_reply()`. `W` (WiFi/MQTT status) is serial-only; over MQTT it is an unknown
+   command.
+4. `net_mqtt_publish_state()` and `net_mqtt_publish_reply()` copy the text into the TX queue
+   (depth 8, 64 bytes each, timeout 0). A successful state change calls the former whatever the
+   command's source.
+5. The pump task drains the TX queue into `esp_mqtt_client_enqueue()` — only while the client is
+   connected; otherwise the item is dropped, because the connect handler republishes the current
+   state anyway and a stale reply would be misleading.
 
 ### Connection handling
 
-`net_mqtt_poll()` starts the client when WiFi reports connected and stops it when WiFi drops.
-esp-mqtt's built-in auto-reconnect stays **enabled**: the client only runs while WiFi is up, so
-its retry toward a dead broker is harmless, runs in its own task and needs no policy code. (The
-WiFi SDK's reconnect engine had to be disabled because it raced the project's own policy; there
-is no such policy here.)
+The pump task also owns the client's lifecycle. Every 100 ms it reads `WiFi.status()`: WiFi up
+and client not started → `esp_mqtt_client_start()`; WiFi down and client started →
+`esp_mqtt_client_stop()`. esp-mqtt's built-in auto-reconnect stays **enabled** (5 s): the client
+only runs while WiFi is up, so its retry toward a dead broker is harmless and needs no policy
+code. (The WiFi SDK's reconnect engine had to be disabled because it raced the project's own
+policy; there is no such policy here.)
 
-With the broker down the board keeps its state and keeps sampling CP. If the command queue is
-full the command is dropped and a line goes to serial only; this cannot happen at human speed.
+On the `CONNECTED` event the esp-mqtt task subscribes to `evsim/cmd/state` and publishes `online`
+and the current state. The last-will is `offline` on `evsim/status`, retained; the keepalive is
+10 s so the broker publishes it about 15 s after the board vanishes.
 
-The last-will is `offline` on `evsim/status`, retained.
+With the broker down the board keeps its state and keeps sampling CP.
 
 ## Testing
 
-- **Native unit tests** (`pio test -e native`): topic building, payload parsing including the
-  serial-equivalent leniency, retained-message rejection.
+- **Native unit tests** (`pio test -e native`): message-acceptance rules (retained, empty,
+  oversize, fragmented and NUL-containing payloads are ignored) and sanitizing of echoed bytes.
 - **CP-sampling interference**: run `tools/cp_jitter.py` with MQTT connected, and again with
   the broker stopped so the client retries continuously; `compare` shows whether MQTT disturbs
   CP sampling. The baseline is the firmware without MQTT, as for WiFi.
@@ -114,7 +132,7 @@ laboratory LAN for stage one.
 ## Out of scope
 
 - Publishing CP measurements (`evsim/cp`), the next design. It will publish from the existing
-  200 ms sample tick into the same client, with rate limiting so publishing cannot disturb
+  200 ms sample tick through the same TX queue, with rate limiting so publishing cannot disturb
   sampling.
 - Authentication and TLS. Revisit when the separate server takes over and the broker leaves the
   computer; note that the broker IP in `mqtt_config.h` must then change.

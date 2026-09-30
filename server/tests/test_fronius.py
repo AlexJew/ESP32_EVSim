@@ -150,6 +150,18 @@ class WriteTest(Base):
             with self.assertRaises(ValueError):
                 self.inv.set_conn(bad)
 
+    def test_a_conn_write_that_is_not_kept_is_an_error(self):
+        real = self.modbus.write_single
+
+        def lossy(addr, value):
+            real(addr, value)
+            self.fake.regs[addr] = 1 - value
+
+        self.modbus.write_single = lossy
+        with self.assertRaises(IOError) as cm:
+            self.inv.set_conn(0)
+        self.assertIn("read back", str(cm.exception))
+
     def test_no_other_register_can_be_written(self):
         with self.assertRaises(ValueError):
             self.inv._write("wmax", 1)

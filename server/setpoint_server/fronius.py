@@ -216,3 +216,6 @@ class Inverter:
 
     def set_conn(self, value):
         self._write("conn", value)
+        conn = self.controls()["conn"]
+        if conn != value:
+            raise IOError("read back Conn=%d, expected %d" % (conn, value))

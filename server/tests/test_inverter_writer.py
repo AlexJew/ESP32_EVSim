@@ -5,9 +5,11 @@ import threading
 import time
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
 from fake_inverter import FakeInverter, M103, M123
 from setpoint_server import config
+from setpoint_server.fronius import Inverter, ModbusTcp
 from setpoint_server.inverter_writer import InverterWriter
 
 NOW = datetime(2026, 9, 30, 13, 42, 7, tzinfo=timezone.utc)
@@ -189,6 +191,77 @@ class WriterTest(unittest.TestCase):
         self.assertEqual((self.fake.regs[PCT], self.fake.regs[ENA]), (3233, 1))
         writer.stop()
         self.assertEqual((self.fake.regs[PCT], self.fake.regs[ENA]), (0, 1))
+
+
+    def test_stop_leaves_a_zero_cap_even_when_the_inverter_answers_slowly(self):
+        # A congested link: every round trip takes 0.8 s. The shutdown cap must not depend on the writer
+        # finishing its current step first, and stop() must not give up before it is written.
+        class SlowModbus(ModbusTcp):
+            def read(self, addr, count):
+                time.sleep(0.8)
+                return super().read(addr, count)
+
+            def write_single(self, addr, value):
+                time.sleep(0.8)
+                super().write_single(addr, value)
+
+        with mock.patch("setpoint_server.inverter_writer.ModbusTcp", SlowModbus), \
+                mock.patch.object(config, "INVERTER_TIMEOUT_S", 1), \
+                mock.patch.object(Inverter, "models", lambda inv: self.fake.chain):
+            writer = InverterWriter("127.0.0.1", self.port, timeout_s=1, period_s=0.05)
+            writer.set_target(4000.0)
+            writer.start()
+            deadline = time.monotonic() + 15
+            while (PCT, 3233) not in self.fake.writes and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertIn((PCT, 3233), self.fake.writes)
+            writer.stop()
+            self.assertEqual((self.fake.regs[PCT], self.fake.regs[ENA]), (0, 1))
+
+    def test_an_inverter_that_leaves_standby_on_its_own_is_stopped_again(self):
+        self.writer.step_once()                          # no data: zero cap
+        self.clock.t += config.STANDBY_AFTER_S
+        self.writer.step_once()                          # standby
+        self.assertEqual(self.fake.regs[CONN], 0)
+        # The inverter restarts on its own with the control registers reset (a reboot, or the web UI's
+        # "Reset Modbus API Control"): it runs again, uncapped, while the writer believes it is in standby.
+        self.fake.regs[CONN], self.fake.regs[ENA], self.fake.regs[PCT] = 1, 0, 10000
+        self.fake.put(ST, [4])
+        self.clock.t += 1
+        self.writer.step_once()
+        self.assertEqual((self.fake.regs[CONN], self.fake.regs[PCT], self.fake.regs[ENA]), (0, 0, 1))
+        self.assertEqual(self.last()["mode"], "standby")
+
+    def test_forcing_stops_when_the_inverter_never_starts(self):
+        self.fake.regs[CONN] = 0
+        self.fake.put(ST, [2])                           # SLEEPING: no DC, so it never starts
+        self.writer.set_target(4000.0)
+        self.writer.step_once()                          # resume
+        self.assertEqual(self.last()["mode"], "starting")
+        self.clock.t += 100
+        self.writer.set_target(4000.0)
+        self.writer.step_once()
+        self.assertEqual(self.last()["mode"], "starting")    # still inside the forcing window
+        self.clock.t += config.STARTING_FORCE_S
+        self.writer.set_target(4000.0)
+        self.writer.step_once()                          # past the window
+        self.assertEqual(self.last()["mode"], "capped")
+        del self.fake.writes[:]
+        self.clock.t += 1
+        self.writer.set_target(4000.0)
+        self.writer.step_once()
+        self.assertEqual(self.fake.writes, [])
+
+    def test_no_forcing_while_the_target_is_zero(self):
+        self.fake.regs[CONN] = 0
+        self.fake.put(ST, [2])
+        self.writer.set_target(0.0)
+        self.writer.step_once()                          # resume with a valid 0 W target
+        del self.fake.writes[:]
+        self.clock.t += 1
+        self.writer.set_target(0.0)
+        self.writer.step_once()
+        self.assertEqual(self.fake.writes, [])
 
 
 if __name__ == "__main__":

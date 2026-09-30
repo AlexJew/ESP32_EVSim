@@ -31,6 +31,7 @@ DEADBAND_W = 100                     # a new DC target is written only if it mov
 REFRESH_S = 10                       # re-commit the current cap this often
 STANDBY_AFTER_S = 120                # no data for this long: Conn = 0
 MAILBOX_STALE_S = 3                  # a target older than this counts as no data
+STARTING_FORCE_S = 180               # after a resume, force the cap this long, then stop (the inverter may never start)
 WRITER_PERIOD_S = 1                  # the writer's step
 BACKOFF_MIN_S = 1                    # retry delay toward an unreachable inverter
 BACKOFF_MAX_S = 5

@@ -41,8 +41,10 @@ class FakeInverter:
             chain.append((123, 24))
         chain += [(160, 88), (124, 24)]
         addr = 40002
+        self.chain = {}
         for mid, length in chain:
             self.put(addr, [mid, length])
+            self.chain[mid] = (addr + 2, length)
             addr += 2 + length
         self.put(addr, [0xFFFF, 0])
         assert addr == END or not with_123

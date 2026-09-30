@@ -75,6 +75,15 @@ outage. Only `no_data` runs the 120 s clock.
 - **Inverter unreachable, or a Modbus error:** the writer closes the connection, retries with a backoff of
   1 to 5 s, and on reconnect re-reads the controls and re-asserts the current cap. The status shows
   `unreachable` with the error.
+- **Standby is watched.** While in standby the writer reads `Conn` every step. If the inverter left standby on
+  its own (a reboot, or a press of "Reset Modbus API Control", which also clears the cap), the writer stops it
+  again: 0 % cap, then `Conn` = 0. `Conn` writes are read back like the others.
+- **Forcing after a resume is bounded.** After `Conn` = 1 the cap is forced every step, but only while the target
+  is above 0 W and only for 180 s. An inverter that never starts (no DC because the charger's contactor is open)
+  must not be written to every second for hours; after 180 s the status returns to `capped`.
+- **A stop is not lost on a slow link.** Once a stop is requested the writer skips the rest of its step and
+  writes the 0 % cap; `stop()` waits for that (up to nine round-trip timeouts) and logs a warning if it could not
+  confirm it.
 - **Stale mailbox:** if the once-a-second target has not been refreshed for 3 s (a stalled server tick),
   the writer treats it as no data.
 - **Known limit, accepted:** if the link to the inverter dies while it holds a cap, the cap stays. A dead

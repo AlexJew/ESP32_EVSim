@@ -41,11 +41,13 @@ class InverterWriter:
         self._clock = clock
         self._utcnow = utcnow
         self._period = period_s
+        self._timeout_s = timeout_s
         self._lock = threading.Lock()
         self._target = None
         self._target_time = None
         self._inverter = None
         self._starting = False
+        self._starting_since = None
         self._cap_ac_w = None
         self._last_error = None
         self._retry_at = 0.0
@@ -75,7 +77,11 @@ class InverterWriter:
         self._stopped = True
         self._stop.set()
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=2 * config.INVERTER_TIMEOUT_S + 2)
+            # The thread finishes its in-flight request, then writes the 0 % cap (about 7 round trips),
+            # each of which may take up to the timeout on a degraded link.
+            self._thread.join(timeout=self._timeout_s * 9 + 2)
+            if self._thread.is_alive():
+                log.warning("the inverter writer did not stop in time; the 0 percent cap is not confirmed")
         else:
             self._final_zero()
 
@@ -98,8 +104,22 @@ class InverterWriter:
                     return
                 self._connect()
             inv = self._inverter
-            for action in self._controller.step(now, target, force=self._starting):
+            if self._starting and now - self._starting_since >= config.STARTING_FORCE_S:
+                log.warning("the inverter did not start within %d s; no longer forcing the cap",
+                            config.STARTING_FORCE_S)
+                self._starting = False
+            if self._controller.mode == "standby" and target is None and inv.controls()["conn"] != 0:
+                # It left standby on its own (a reboot, or the web UI's "Reset Modbus API Control"),
+                # so it is running uncapped: stop it again.
+                log.warning("the inverter left standby on its own; stopping it again")
+                self._controller.reset()
+            force = self._starting and bool(target)      # a 0 W target is already capped: nothing to force
+            for action in self._controller.step(now, target, force=force):
+                if self._stop.is_set():
+                    return                               # shutting down: _final_zero writes the 0 % cap
                 self._perform(inv, action)
+            if self._stop.is_set():
+                return
             power = inv.power()
             if self._starting and power["state"] == MPPT:
                 self._starting = False
@@ -135,6 +155,7 @@ class InverterWriter:
         elif action.kind == "resume":
             inv.set_conn(1)
             self._starting = True
+            self._starting_since = self._clock()
 
     def _fail(self, now, exc):
         text = str(exc) or type(exc).__name__

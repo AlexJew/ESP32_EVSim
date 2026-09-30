@@ -1,6 +1,6 @@
 ---
 name: evsim-network
-description: EVSim lab network - SSID hems, ESP32 static 192.168.21.138/24, AMTRON 192.168.21.117, Fronius 192.168.21.122, gateway 192.168.21.130, no DHCP and no internet
+description: EVSim lab network - SSID hems, ESP32 static 192.168.21.138/24, AMTRON 192.168.21.117, Fronius 192.168.21.120, gateway 192.168.21.130, no DHCP and no internet
 metadata:
   type: project
 ---
@@ -13,7 +13,7 @@ configured in firmware ([[evsim-firmware-layout]]).
 | SSID | `hems` |
 | ESP32 (EVSim board) | `192.168.21.138` |
 | AMTRON charger | `192.168.21.117` |
-| Fronius GEN24 inverter | `192.168.21.122` |
+| Fronius GEN24 12.0 Plus SC inverter | `192.168.21.120` (an earlier note had `.122`) |
 | WLAN gateway | `192.168.21.130` |
 | Subnet mask | `255.255.255.0` (`/24`) |
 

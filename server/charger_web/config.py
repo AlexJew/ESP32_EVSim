@@ -24,3 +24,10 @@ def charger_credentials():
         os.environ.get("EVSIM_CHARGER_USERNAME", ""),
         os.environ.get("EVSIM_CHARGER_PASSWORD", ""),
     )
+
+
+MODBUS_PORT = 502
+
+
+def modbus_register_map():
+    return os.environ.get("EVSIM_CHARGER_REGISTERS") or None

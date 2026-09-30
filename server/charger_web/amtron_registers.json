@@ -1,0 +1,8 @@
+{
+  "_note": "Fill in from the MENNEKES AMTRON Modbus register documentation, or find them with tools/amtron_modbus_probe.py. A null address leaves that value unavailable. Writes stay refused until operator_limit has an address.",
+  "unit": 255,
+  "operator_limit": {"table": "holding", "address": null, "scale": 1},
+  "installation_limit": {"table": "input", "address": null, "scale": 1},
+  "signalled_current": {"table": "input", "address": null, "scale": 1},
+  "meter_current": {"table": "input", "addresses": {"L1": null, "L2": null, "L3": null}, "scale": 1}
+}

@@ -50,6 +50,22 @@ lab unit, but the configured account's access and the write/readback behavior
 still need verification on this firmware. The AMTRON currently serves plain
 HTTP, so the page process must remain bound to loopback.
 
+### Modbus TCP backend (no web session)
+
+The REST backend shares the charger's single web session with the AMTRON page.
+The Modbus backend avoids that: enable "Modbus TCP Server" on the charger's Load
+Management page, then
+
+    .venv/bin/python -m charger_web --backend modbus
+
+It needs no charger username or password. The register addresses are not in the
+repository: fill in `charger_web/amtron_registers.json` (or point
+`EVSIM_CHARGER_REGISTERS` at another file) from the MENNEKES register
+documentation. To find them, run the read-only scanner
+`tools/amtron_modbus_probe.py`, change the operator limit on the AMTRON page, run
+it again, and diff the two outputs. Until `operator_limit` has an address, writes
+are refused and the page shows "Credentials not configured".
+
 Watch the output:
 
     mosquitto_sub -v -t evsim/setpoint

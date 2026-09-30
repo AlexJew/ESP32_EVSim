@@ -25,6 +25,8 @@ def main(argv=None):
     )
     parser.add_argument("--host", default=DEFAULT_WEB_HOST, help="must be 127.0.0.1")
     parser.add_argument("--port", type=_port, default=DEFAULT_WEB_PORT, help="local page port (default %(default)s)")
+    parser.add_argument("--backend", choices=("rest", "modbus"), default="rest",
+                        help="rest: charger web login (one session); modbus: Modbus TCP (default %(default)s)")
     args = parser.parse_args(argv)
     if args.host != DEFAULT_WEB_HOST:
         parser.error("the charger web interface must bind to 127.0.0.1")
@@ -32,7 +34,12 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     server: ThreadingHTTPServer | None = None
     try:
-        server = create_server(host=args.host, port=args.port)
+        charger = None
+        if args.backend == "modbus":
+            from .charger_modbus import ModbusChargerClient
+
+            charger = ModbusChargerClient()
+        server = create_server(charger=charger, host=args.host, port=args.port)
         logging.getLogger("charger_web").info("charger page listening at http://127.0.0.1:%d/", args.port)
         server.serve_forever()
     except KeyboardInterrupt:

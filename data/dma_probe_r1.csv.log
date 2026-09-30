@@ -1,0 +1,13 @@
+# opening /dev/cu.usbserial-210 at 115200 (this resets the board)
+  # EVSim -- CP PWM reader on GPIO35, pilot state control on GPIO32/33
+  # send A, B or C to set the pilot state; A -> C is refused
+  # send W for WiFi and MQTT status
+  # net_wifi: Idle -> Connecting
+  # pilot state A
+# sending B
+# sending C
+# settling 3.0 s, then logging 60 s
+  # state A -> B
+  # net_wifi: Connecting -> Connected, ip 192.168.21.138
+  # state B -> C
+# wrote data/dma_probe_r1.csv: 299 rows, 299 PWM_VALID

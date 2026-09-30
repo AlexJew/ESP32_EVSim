@@ -1,0 +1,84 @@
+# opening /dev/cu.usbserial-210 at 115200 (this resets the board)
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # EVSim -- CP PWM reader on GPIO35, pilot state control on GPIO32/33
+  # send A, B or C to set the pilot state; A -> C is refused
+  # send W for WiFi and MQTT status
+  # net_wifi: Idle -> Connecting
+  # pilot state A
+# sending B
+# sending C
+# settling 3.0 s, then logging 60 s
+  # state A -> B
+  # state B -> C
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 82829 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99329 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98815 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # net_wifi: Connecting -> Backoff, retry in 1000 ms
+  # net_wifi: Backoff -> Connected, ip 192.168.21.138
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # net_wifi: Connected -> Backoff, retry in 1000 ms
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # net_wifi: Backoff -> Connecting
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98815 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # net_wifi: Connecting -> Backoff, retry in 2000 ms
+  # net_wifi: Backoff -> Connected, ip 192.168.21.138
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99326 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98814 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 98816 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99327 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+  # adc_timing: variant 4 (I2S DMA), configured 100000 Hz, actual 99328 samples/s
+# wrote data/adc_v4_r1.csv: 299 rows, 299 PWM_VALID

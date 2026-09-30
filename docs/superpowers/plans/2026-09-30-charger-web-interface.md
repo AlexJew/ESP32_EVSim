@@ -47,17 +47,17 @@
 
 **Steps:**
 
-- [ ] Create a standalone package that imports no `setpoint_server` modules and no MQTT dependencies. Read username/password from `EVSIM_CHARGER_USERNAME` and `EVSIM_CHARGER_PASSWORD`; default charger host to `192.168.21.117` and allow `EVSIM_CHARGER_HOST` to override it.
-- [ ] Add a `python -m charger_web` entry point with a loopback-only `--host` (default `127.0.0.1`) and optional `--port` (default 8080). Reject a host other than `127.0.0.1`.
-- [ ] Implement a standard-library HTTP request helper with a 3-second timeout, gzip decoding, JSON parsing, `Authorization: <session-id>`, and error messages that never include request headers or response bodies.
-- [ ] Implement challenge login using the CC612 flow verified on the device. The Bender docs describe `GET /v1/login`, SHA-256 of password concatenated with the challenge token, then `POST /v1/login`; the lab controller returned HTTP 200 to the GET probe. Check the actual login response/session schema locally before treating authentication as verified.
-- [ ] Keep the returned session ID in memory. On a 401, log in once and retry that operation once; return a clear failure if renewal also fails.
-- [ ] Serialize login, reads, writes, and readback through one lock. Parse settings and dashboard fields from the existing `/json/settings.json` and `/json/dashboard.json` formats.
-- [ ] Cache settings for 30 seconds and dashboard readings for two seconds. Keep the last good data and mark it stale when a refresh fails. Track reading timestamps separately so a missing meter value does not invalidate a valid signal reading.
-- [ ] Normalize scalar currents and meter phase values while preserving numeric zero. Represent malformed or absent measurements as unavailable, never as zero.
-- [ ] Validate that `value` has exact type `int` (so booleans are rejected), is 0 or 6–16, and is no greater than the charger installation limit. Refresh settings before a write, POST only `OperatorCurrentLimit_vehicleif`, force settings readback, and return success only on exact match.
+- [x] Create a standalone package that imports no `setpoint_server` modules and no MQTT dependencies. Read username/password from `EVSIM_CHARGER_USERNAME` and `EVSIM_CHARGER_PASSWORD`; default charger host to `192.168.21.117` and allow `EVSIM_CHARGER_HOST` to override the host.
+- [x] Add a `python -m charger_web` entry point with a loopback-only `--host` (default `127.0.0.1`) and optional `--port` (default 8080). Reject a host other than `127.0.0.1`.
+- [x] Implement a standard-library HTTP request helper with a 3-second timeout, gzip decoding, JSON parsing, `Authorization: <session-id>`, and error messages that never include request headers or response bodies.
+- [x] Implement challenge login using the documented CC612 flow: `GET /v1/login`, SHA-256 of password concatenated with the challenge token, then `POST /v1/login`. The lab controller returned HTTP 200 to the GET probe. A successful login response and account role still need local verification before treating authentication as hardware-verified.
+- [x] Keep the returned session ID in memory. On a 401, log in once and retry that operation once; return a clear failure if renewal also fails.
+- [x] Serialize login, reads, writes, and readback through one lock. Parse settings and dashboard fields from the existing `/json/settings.json` and `/json/dashboard.json` formats.
+- [x] Cache settings for 30 seconds and dashboard data for two seconds. Keep last successful readings and mark them stale after refresh failures. Track signal and meter timestamps separately so a missing meter value does not invalidate a valid signal reading.
+- [x] Normalize scalar currents and meter phase values while preserving numeric zero. Represent malformed or absent measurements as unavailable, never as zero.
+- [x] Validate that `value` has exact type `int` (so booleans are rejected), is 0 or 6–16, and is no greater than the charger installation limit. Refresh settings before a write, POST only `OperatorCurrentLimit_vehicleif`, force settings readback, and return success only on exact match. After an ambiguous POST error, force a readback but still report the write as unconfirmed.
 
-**Review:** Confirm no session ID, password, or challenge token reaches logs, disk, or the browser response. Confirm startup without credentials returns `not_configured` and does not raise out of the client.
+**Review:** Code inspection confirms no session ID, password, or challenge token reaches logs, disk, or browser responses. Startup without credentials returns `not_configured` from the status API.
 
 ### Task 2: Local HTTP API and page
 
@@ -71,14 +71,14 @@
 
 **Steps:**
 
-- [ ] Implement the HTTP service within `charger_web`; serve only named package assets, and keep request handling in the independent charger web process.
-- [ ] Serve `/` and only the named JavaScript and CSS assets. Do not allow arbitrary filesystem paths.
-- [ ] Implement `GET /api/charger/status` returning `ChargerClient.status()` as JSON.
-- [ ] Implement `POST /api/charger/operator-limit`; require same-origin `Origin`, exact expected `Host`, JSON content type, a body no larger than 1024 bytes, and exactly one integer property named `current_limit_a`. Return structured validation or charger errors without echoing credentials or tokens.
-- [ ] Render configured operator limit, installation ceiling, signalled current, per-phase meter current, reading freshness, and update times. Display numeric zero as `0 A`.
-- [ ] Poll status every two seconds; rely on the client cache for settings refresh every 30 seconds. Keep settings separate from dashboard refresh cadence.
-- [ ] Disable Apply while a write is pending; display success only when the API returns the matching charger readback. Require an explicit button action to write.
-- [ ] Keep the page usable in unavailable and not-configured states, and make stale values visibly distinct from fresh readings.
+- [x] Implement the HTTP service within `charger_web`; serve only named package assets, and keep request handling in the independent charger web process.
+- [x] Serve `/` and only the named JavaScript and CSS assets. Do not allow arbitrary filesystem paths.
+- [x] Implement `GET /api/charger/status` returning `ChargerClient.status()` as JSON.
+- [x] Implement `POST /api/charger/operator-limit`; require same-origin `Origin`, exact expected `Host`, JSON content type, a body no larger than 1024 bytes, and exactly one integer property named `current_limit_a`. Reject duplicate JSON keys. Return structured validation or charger errors without echoing credentials or tokens.
+- [x] Render configured operator limit, installation ceiling, signalled current, per-phase meter current, reading freshness, and update times. Display numeric zero as `0 A`.
+- [x] Poll status every two seconds; rely on the client cache for settings refresh every 30 seconds. Keep settings separate from dashboard refresh cadence.
+- [x] Disable Apply while a write is pending; display success only when the API returns the matching charger readback. Require an explicit button action to write.
+- [x] Keep the page usable in unavailable and not-configured states, and make stale values visibly distinct from fresh readings. Report overall connection health separately from independently unavailable readings.
 
 **Review:** Confirm requests from another LAN address cannot reach the listener and cross-origin POST requests are rejected.
 
@@ -89,12 +89,22 @@
 
 **Steps:**
 
-- [ ] Document the independent startup command from `server/`, credential environment variables, optional host/port settings, local URL, CC612 login firmware dependency, and loopback-only restriction.
-- [ ] Document that the setpoint server and charger web server start and stop as separate processes. Do not change the setpoint server entry point or its MQTT behavior.
-- [ ] Show a two-terminal development workflow and explain that stopping either process leaves the other running.
+- [x] Document the independent startup command from `server/`, credential environment variables, optional host/port settings, local URL, CC612 login firmware dependency, and loopback-only restriction.
+- [x] Document that the setpoint server and charger web server start and stop as separate processes. Do not change the setpoint server entry point or its MQTT behavior.
+- [x] Show a two-terminal development workflow and explain that stopping either process leaves the other running.
 
 **Review:** Confirm the documented charger page has no code path that starts, stops, imports, or signals the MQTT averaging process.
 
 ### Task 4: Review and verification
 
-Inspect the final diff against the design spec, check for accidental edits to the unrelated inverter files, and run `python -m compileall -q server/charger_web` as a syntax check (not a test). Do not claim hardware authentication/write acceptance until the login flow and 0 A behavior are verified on the charger. Do not issue a charger setting write as part of implementation verification.
+- [x] Inspect the implementation against the design spec and confirm the setpoint server files are unchanged.
+- [x] Run `python3 -m compileall -q server/charger_web` (Python syntax check, not a test).
+- [x] Run `node --check server/charger_web/static/app.js` (JavaScript syntax check, not a test).
+- [x] Run `git diff --check` for tracked edits; no trailing whitespace was found in the new package files.
+- [x] Complete a read-only code review and address all Critical/Important findings plus the noted Minor findings.
+- [ ] Do not claim hardware authentication/write acceptance until the login flow and 0 A behavior are verified on the charger. Do not issue a charger setting write as part of implementation verification.
+
+### Device-side checks still required
+
+- [ ] With credentials supplied locally, verify the full login response schema and role, then read settings and dashboard values from this CC612 firmware.
+- [ ] On the charger, confirm a setting write and exact readback work; separately observe the physical signaling and meter response to 0 A. Do not infer that 0 A pauses or stops charging.

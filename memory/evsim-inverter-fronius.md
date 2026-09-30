@@ -141,7 +141,8 @@ One standard-library script for all of the above: `probe`, `status`, `watch` (re
 `set --dc WATTS` (uses the calibration), `off` and `conn 0|1`. It discovers the model addresses at run time,
 re-reads the scale factors every time, writes only `WMaxLimPct`, `WMaxLim_Ena` and `Conn` (range-checked and
 read back), and always commits a cap with the `Ena` write. Tests run against a fake inverter, never the real
-one: `python3 -m unittest discover -s tools -p 'test_fronius*.py'`. Default host 192.168.21.120.
+one: `cd server && .venv/bin/python -m unittest discover -s tests -p 'test_fronius*.py'`. Default host
+192.168.21.120. The code lives in `server/setpoint_server/fronius.py` and `fronius_cli.py`; the tool is a shim.
 
 ## Still to test before relying on it
 

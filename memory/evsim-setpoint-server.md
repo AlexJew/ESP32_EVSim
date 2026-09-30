@@ -47,3 +47,10 @@ the server is relied on unattended.
   and an outage logs one warning per second.
 
 Also not seen on hardware yet: the held setpoint through the charger's 6-12 s gaps (the bench run was 8 s).
+
+## Driving the inverter (added 2026-09-30)
+
+With `--inverter HOST` the server also caps the Fronius inverter over Modbus TCP so that its DC input from the
+charger equals the setpoint; see [[evsim-inverter-fronius]] and
+`docs/superpowers/specs/2026-09-30-inverter-writer-design.md`. Dead-band 100 W, refresh 10 s, 0 % cap on no
+data, standby after 120 s, 0 % cap left on a clean stop. Status on `evsim/inverter`. Off unless the flag is given.

@@ -127,13 +127,21 @@ Sweep 2026-09-30 (each cap committed and held 14 s, last 7 s averaged, inverter'
 | 7 296 | 7 535 | 0.968 |
 
 Least-squares fit: **DC = 1.0303 x AC + 6.3 W** (worst residual 19 W = 0.9 % at 2 kW, elsewhere under 0.25 %).
-To take a wanted DC power P_dc from the charger: **AC cap = (P_dc - 6.3) / 1.0303** (about 3 W more to offset the
-settling error), then register = cap / 12 000 x 10 000. Examples: 4 000 W DC -> 3 876 W AC -> register 3230;
-7 000 W DC -> 6 788 W AC -> register 5656.
+To take a wanted DC power P_dc from the charger: **AC cap = (P_dc - 6.3) / 1.0303 + 3 W** (the 3 W offsets the
+settling error), then register = cap / 12 000 x 10 000. Examples: 4 000 W DC -> 3 879 W AC -> register 3233;
+7 000 W DC -> 6 791 W AC -> register 5659.
 
 Caveats: the DC power is the inverter's own MPPT measurement, so its accuracy is unknown; validate against the
 AMTRON's meter or a power analyser. Measured at 515-545 V DC only. A closed-loop trim (read the DC power over
 Modbus and correct the cap) is possible later.
+
+## Tool: `tools/fronius_modbus.py`
+
+One standard-library script for all of the above: `probe`, `status`, `watch` (read-only), `set WATTS`,
+`set --dc WATTS` (uses the calibration), `off` and `conn 0|1`. It discovers the model addresses at run time,
+re-reads the scale factors every time, writes only `WMaxLimPct`, `WMaxLim_Ena` and `Conn` (range-checked and
+read back), and always commits a cap with the `Ena` write. Tests run against a fake inverter, never the real
+one: `python3 -m unittest discover -s tools -p 'test_fronius*.py'`. Default host 192.168.21.120.
 
 ## Still to test before relying on it
 

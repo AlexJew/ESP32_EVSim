@@ -25,8 +25,9 @@ def _utcnow():
 
 
 class SetpointServer:
-    def __init__(self, client, clock=time.monotonic, utcnow=_utcnow):
+    def __init__(self, client, clock=time.monotonic, utcnow=_utcnow, writer=None):
         self._client = client
+        self._writer = writer
         self._clock = clock
         self._utcnow = utcnow
         self._averager = WindowAverager(config.WINDOW_S)
@@ -69,6 +70,9 @@ class SetpointServer:
         with self._lock:
             count, mean = self._averager.average(self._clock())
         payload = format_setpoint(count, mean, config.WINDOW_S, self._utcnow())
+        if self._writer is not None:
+            # The inverter is driven from the average whether or not MQTT is up.
+            self._writer.set_target(mean if count > 0 else None)
         if not self._client.is_connected():
             log.warning("broker not connected; skipping %s", payload)
             return
@@ -115,4 +119,6 @@ class SetpointServer:
                 log.info("published server_offline")
             except (RuntimeError, ValueError) as exc:
                 log.warning("could not publish server_offline: %s", exc)
+        if self._writer is not None:
+            self._writer.stop()          # leaves the inverter at a 0 percent cap
         self._client.disconnect()

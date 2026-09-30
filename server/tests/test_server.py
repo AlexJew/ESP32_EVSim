@@ -121,7 +121,7 @@ class SetpointServerTest(unittest.TestCase):
 
     def test_unusable_messages_are_dropped(self):
         for payload in (b"garbage", b'{"setpoint_w":-5}', b'{"setpoint_w":"x"}',
-                        b'{"setpoint_w":null}', b'{"setpoint_w":11001}'):
+                        b'{"setpoint_w":null}', b'{"setpoint_w":12001}'):
             self.feed(payload)
         self.feed(b'{"setpoint_w":700}')
         self.server.tick()
@@ -170,6 +170,67 @@ class SetpointServerTest(unittest.TestCase):
         thread.join(timeout=3)
         self.assertFalse(thread.is_alive())
         self.assertEqual(self.client.published[-1][1], offline_payload(config.WINDOW_S))
+        self.assertTrue(self.client.disconnected)
+
+
+class FakeWriter:
+    """Stands in for the InverterWriter: records what the server hands it."""
+
+    def __init__(self, client):
+        self._client = client
+        self.targets = []
+        self.published_when_stopped = None
+        self.disconnected_when_stopped = None
+
+    def set_target(self, watts):
+        self.targets.append(watts)
+
+    def stop(self):
+        self.published_when_stopped = list(self._client.published)
+        self.disconnected_when_stopped = self._client.disconnected
+
+
+class WriterIntegrationTest(unittest.TestCase):
+    def setUp(self):
+        logging.disable(logging.CRITICAL)
+        self.addCleanup(logging.disable, logging.NOTSET)
+        self.client = FakeClient()
+        self.clock = FakeClock()
+        self.writer = FakeWriter(self.client)
+        self.server = SetpointServer(self.client, clock=self.clock, utcnow=lambda: NOW, writer=self.writer)
+
+    def feed(self, payload):
+        self.client.on_message(self.client, None, message(payload))
+
+    def test_tick_hands_the_mean_to_the_writer(self):
+        self.feed(b'{"setpoint_w":1000}')
+        self.clock.t = 100.2
+        self.feed(b'{"setpoint_w":2000}')
+        self.clock.t = 100.4
+        self.server.tick()
+        self.assertEqual(self.writer.targets, [1500.0])
+
+    def test_no_data_hands_none_to_the_writer(self):
+        self.server.tick()
+        self.assertEqual(self.writer.targets, [None])
+
+    def test_the_writer_is_fed_even_when_mqtt_is_down(self):
+        self.client.connected = False
+        self.feed(b'{"setpoint_w":1000}')
+        self.server.tick()
+        self.assertEqual(self.writer.targets, [1000.0])
+        self.assertEqual(self.client.published, [])
+
+    def test_shutdown_stops_the_writer_after_the_offline_message_and_before_disconnecting(self):
+        self.server.shutdown()
+        self.assertEqual(self.writer.published_when_stopped[-1][1], offline_payload(config.WINDOW_S))
+        self.assertFalse(self.writer.disconnected_when_stopped)
+        self.assertTrue(self.client.disconnected)
+
+    def test_shutdown_stops_the_writer_even_when_mqtt_is_down(self):
+        self.client.connected = False
+        self.server.shutdown()
+        self.assertEqual(self.writer.published_when_stopped, [])
         self.assertTrue(self.client.disconnected)
 
 

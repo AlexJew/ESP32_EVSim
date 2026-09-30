@@ -30,10 +30,11 @@ value on the broker.
 The board's `status`, `t` and the other fields are ignored: the board has already applied its hold
 rules to `setpoint_w`, and `t` is uptime, not a wall clock.
 
-A `setpoint_w` above **11 000 W** is unusable. The cap is the charger's 11 kW rating, so a larger value
-is treated as a corrupt or foreign message. The server drops it (see Failure handling) rather than clamping it to
-11 000 W, so it never publishes a load the charger did not offer. The cap is a named constant in
-`config.py`.
+A `setpoint_w` above **12 000 W** is unusable. The cap is the inverter's 12 kW rating (it started at the
+charger's 11 kW, but a full 16 A offer is about 11.2 kW on the board's 690 V conversion, which that cap would
+have dropped), so a larger value is treated as a corrupt or foreign message. The server drops it (see Failure
+handling) rather than clamping it to 12 000 W, so it never publishes a load that no one offered. The cap is a
+named constant in `config.py`.
 
 **Output** — topic `evsim/setpoint`, **QoS 0**, **retained**, one message per second. QoS 0 is
 deliberate, and was QoS 1 in the first draft: paho queues a QoS 1 publish it cannot send yet, or one
@@ -139,7 +140,7 @@ spec. The server needs no extra listener setup.
 ### Failure handling
 
 - **Invalid JSON, `setpoint_w` missing, `null`, non-numeric, a boolean, not finite, negative, or above
-  11 000 W:** the
+  12 000 W:** the
   message is logged and dropped. It does not enter the average and does not stop the loop. A window
   made only of such messages is `no_data`.
 - **A retained `evsim/cp` message** is ignored the same way. The board never retains it, so a retained

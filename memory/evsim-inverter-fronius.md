@@ -135,17 +135,72 @@ Caveats: the DC power is the inverter's own MPPT measurement, so its accuracy is
 AMTRON's meter or a power analyser. Measured at 515-545 V DC only. A closed-loop trim (read the DC power over
 Modbus and correct the cap) is possible later.
 
+## Extended sweep, 2026-09-30 (7 to 10.3 kW AC, charger offering 16.2 A)
+
+Same method as above (each cap committed, held 14 s, last 7 s averaged), stopped short of the charger's offer.
+
+| Cap AC W | AC W | DC W | DC A | DC V | AC/DC |
+|---|---|---|---|---|---|
+| 7 000 | 6 997 | 7 220 | 13.91 | 519.0 | 0.969 (matches the first sweep exactly) |
+| 8 000 | 7 997 | 8 263 | 16.01 | 516.1 | 0.968 |
+| 9 000 | 8 978 | 9 284 | 18.08 | 513.3 | 0.967 |
+| 10 000 | **9 385** | 9 780 | **19.10** | 512.0 | not following the cap |
+| 10 300 | **9 555** | 9 773 | **19.10** | 511.7 | not following the cap |
+
+- **The calibration holds to 9 kW.** The old fit `DC = 1.0303 x AC + 6.3` is off by 17 W (0.2 %) at 8 kW and 28 W
+  (0.3 %) at 9 kW. A refit over all 11 valid points (linear `1.0326 x AC - 1.2`, or quadratic) has an RMS of 7 to
+  11 W against 13 W for the old one, all far inside the 100 W dead-band, so the constants were left as they are.
+- **Above about 9.4 kW AC the cap stops binding.** The DC current is pinned at **19.1 A** (about 9.78 kW DC), whatever the
+  cap. It is the source, not the inverter: 19.1 A DC is about 15.6 A per phase through a three-phase bridge (factor
+  1.2247), close to the AMTRON's 16 A limit. The earlier uncontrolled draw (19.9 A DC at a 10.15 A offer) hit the same
+  ceiling, so the AMTRON does not enforce the *offered* current, only a hard limit near 16 A.
+- **Consequence for the setpoint:** the board turns the offered current into watts as amps x 690 V (16.2 A -> 11 190 W),
+  but the rectified DC voltage sags to about 510 V under load, so the same current is only about 9.8 kW of DC power
+  (about 630 W per offered amp, not 690). Following a watts setpoint of 11.2 kW exactly would need 21.8 A DC, about
+  17.8 A per phase, 10 % over the 16.2 A offered. At lower offers the same 690 V conversion overshoots the offered
+  current by about 7 to 10 %. Open question: convert amps to a DC target using the measured DC voltage (or a
+  factor near 630 W/A), or regulate the DC current instead of the power.
+
 ## Tool: `tools/fronius_modbus.py`
 
 One standard-library script for all of the above: `probe`, `status`, `watch` (read-only), `set WATTS`,
 `set --dc WATTS` (uses the calibration), `off` and `conn 0|1`. It discovers the model addresses at run time,
 re-reads the scale factors every time, writes only `WMaxLimPct`, `WMaxLim_Ena` and `Conn` (range-checked and
 read back), and always commits a cap with the `Ena` write. Tests run against a fake inverter, never the real
-one: `python3 -m unittest discover -s tools -p 'test_fronius*.py'`. Default host 192.168.21.120.
+one: `cd server && .venv/bin/python -m unittest discover -s tests -p 'test_fronius*.py'`. Default host
+192.168.21.120. The code lives in `server/setpoint_server/fronius.py` and `fronius_cli.py`; the tool is a shim.
 
-## Still to test before relying on it
+## Live check of the server driving the inverter, 2026-09-30
 
-- How fast the inverter follows a raised cap and a lowered one (timing at sub-second resolution).
-- What it does when the offered power drops below the cap.
-- Write rate limits (how often the cap can be re-committed) and how `RvrtTms` behaves.
-- An independent check of the DC power (AMTRON meter or analyser).
+`python -m setpoint_server --inverter 192.168.21.120` against the lab broker, the real board and the real inverter,
+with the AMTRON offering 10 to 12 A (7 to 8.5 kW).
+
+- **It tracks.** Target 7 751 W: DC input 7 742-7 776 W (within 0.3 %). Later 8 452 W target: 8 480 W DC (+28 W).
+  Counting the ramps after each step, 87 % of samples were within 100 W; the median error was +4 W.
+- **Steps settle in 2 to 3 s** (DC within 100 W of the new target) for every change of 500 W or more, including
+  the operator's limit changes (about 7.9 -> 8.5 -> 6.4 -> 8.5 kW).
+- **The dead-band keeps the writes calm:** 8 real cap changes (50 W or more) in 3 minutes; the rest was the 10 s
+  refresh moving the cap by about 1 W. No errors and no `unreachable` status anywhere.
+- **Board outage:** the server went to `zero` (0 % cap) within 1 s of the last board message. The board reboots into
+  pilot state A, which is a *valid* 0 W target, so the server stayed `capped` at 0 W (not an outage, no standby).
+  Not isolated: the charger drops its contactor when the board's pilot opens, so the DC also vanished for that reason.
+- **Resume:** after `B` then `C` on `evsim/cmd/state` the server re-applied the cap at once, while the inverter was
+  still asleep. The inverter then restarted by itself, SLEEPING (about 50 s), OFF (about 25 s), STARTING (about 30 s),
+  MPPT, and was at full power about **two minutes** after the `C` command. Any loss of DC (a limit change that drops
+  the contactor, a board reboot) costs this minute or two.
+- **Ctrl-C:** `server_offline` is published, then the 0 % cap is written, and the server exits in about 2 s; the
+  inverter then reads `WMaxLimPct=0 Ena=1`.
+- **Write rate:** 60 cap commits at 1 Hz (alternating 5 000 and 5 100 W) gave **0 errors**, so the inverter tolerates
+  the once-a-second commit the writer can produce.
+
+## Still open
+
+- The 120 s standby fallback and the 0 % cap on no data were not exercised live (bench tests and the earlier
+  floor test cover them); the outage was 13 s and coincided with the contactor opening.
+- Timing below 1 s (the status is once a second), and what the inverter does when the *offered* power falls below a cap
+  that is still higher than the offer.
+- How `RvrtTms` behaves, and an independent check of the DC power (AMTRON meter or analyser).
+- **Amps to watts:** the board turns offered current into watts as amps x 690 V, but the rectified DC voltage sags to
+  about 510 V, so the same current is about 630 W per amp of DC power. Following the 690 V figure exactly would draw
+  7 to 10 % more current than offered. Decide: convert with the measured DC voltage (or about 630 W/A), or regulate
+  the DC current instead of the power.

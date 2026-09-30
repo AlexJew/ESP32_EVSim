@@ -135,6 +135,32 @@ Caveats: the DC power is the inverter's own MPPT measurement, so its accuracy is
 AMTRON's meter or a power analyser. Measured at 515-545 V DC only. A closed-loop trim (read the DC power over
 Modbus and correct the cap) is possible later.
 
+## Extended sweep, 2026-09-30 (7 to 10.3 kW AC, charger offering 16.2 A)
+
+Same method as above (each cap committed, held 14 s, last 7 s averaged), stopped short of the charger's offer.
+
+| Cap AC W | AC W | DC W | DC A | DC V | AC/DC |
+|---|---|---|---|---|---|
+| 7 000 | 6 997 | 7 220 | 13.91 | 519.0 | 0.969 (matches the first sweep exactly) |
+| 8 000 | 7 997 | 8 263 | 16.01 | 516.1 | 0.968 |
+| 9 000 | 8 978 | 9 284 | 18.08 | 513.3 | 0.967 |
+| 10 000 | **9 385** | 9 780 | **19.10** | 512.0 | not following the cap |
+| 10 300 | **9 555** | 9 773 | **19.10** | 511.7 | not following the cap |
+
+- **The calibration holds to 9 kW.** The old fit `DC = 1.0303 x AC + 6.3` is off by 17 W (0.2 %) at 8 kW and 28 W
+  (0.3 %) at 9 kW. A refit over all 11 valid points (linear `1.0326 x AC - 1.2`, or quadratic) has an RMS of 7 to
+  11 W against 13 W for the old one, all far inside the 100 W dead-band, so the constants were left as they are.
+- **Above about 9.4 kW AC the cap stops binding.** The DC current is pinned at **19.1 A** (about 9.78 kW DC), whatever the
+  cap. It is the source, not the inverter: 19.1 A DC is about 15.6 A per phase through a three-phase bridge (factor
+  1.2247), close to the AMTRON's 16 A limit. The earlier uncontrolled draw (19.9 A DC at a 10.15 A offer) hit the same
+  ceiling, so the AMTRON does not enforce the *offered* current, only a hard limit near 16 A.
+- **Consequence for the setpoint:** the board turns the offered current into watts as amps x 690 V (16.2 A -> 11 190 W),
+  but the rectified DC voltage sags to about 510 V under load, so the same current is only about 9.8 kW of DC power
+  (about 630 W per offered amp, not 690). Following a watts setpoint of 11.2 kW exactly would need 21.8 A DC, about
+  17.8 A per phase, 10 % over the 16.2 A offered. At lower offers the same 690 V conversion overshoots the offered
+  current by about 7 to 10 %. Open question: convert amps to a DC target using the measured DC voltage (or a
+  factor near 630 W/A), or regulate the DC current instead of the power.
+
 ## Tool: `tools/fronius_modbus.py`
 
 One standard-library script for all of the above: `probe`, `status`, `watch` (read-only), `set WATTS`,

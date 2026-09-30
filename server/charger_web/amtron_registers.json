@@ -1,8 +1,29 @@
 {
   "_note": "Fill in from the MENNEKES AMTRON Modbus register documentation, or find them with tools/amtron_modbus_probe.py. A null address leaves that value unavailable. Writes stay refused until operator_limit has an address.",
   "unit": 255,
-  "operator_limit": {"table": "holding", "address": null, "scale": 1},
-  "installation_limit": {"table": "input", "address": null, "scale": 1},
-  "signalled_current": {"table": "input", "address": null, "scale": 1},
-  "meter_current": {"table": "input", "addresses": {"L1": null, "L2": null, "L3": null}, "scale": 1}
+  "operator_limit": {
+    "table": "holding",
+    "address": 134,
+    "scale": 1
+  },
+  "installation_limit": {
+    "table": "input",
+    "address": null,
+    "scale": 1
+  },
+  "signalled_current": {
+    "table": "input",
+    "address": null,
+    "scale": 1
+  },
+  "meter_current": {
+    "table": "input",
+    "addresses": {
+      "L1": null,
+      "L2": null,
+      "L3": null
+    },
+    "scale": 1
+  },
+  "_confirmed": "operator_limit = holding 134 (changed 12->14 with the AMTRON page, 2026-09-30). Unverified candidate: holding 133 = 16 may be the installation limit."
 }

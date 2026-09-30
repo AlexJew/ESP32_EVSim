@@ -20,13 +20,16 @@ board publishes the same stream in every case. Two properties of the signal shap
    (`memory/evsim-open-questions.md`). Publishing every sample as a setpoint would send 0 W in each
    gap and make the inverter oscillate. So the board marks each sample and keeps the last valid
    setpoint through a gap.
-2. **The measured duty wanders slowly.** In four 60 s captures in state C the duty had a spread of
-   about 5–6 points (13–42 %), with a correlation of +0.9 between consecutive samples and +0.4 two
-   seconds later. Averaging over 1 s barely helps and publishing one sample per second only
-   subsamples the noise. Whether the wander is the charger or an artefact of the interim
-   low-voltage reader (see `2026-09-22-low-voltage-cp-reader-design.md`) is not known. The right
-   filter depends on that and on what the inverter needs, so it lives with the consumer, where it can be
-   changed without reflashing. The board only publishes unfiltered samples.
+2. **The duty of the original low-voltage reader wandered slowly.** In four 60 s captures in state
+   C the duty had a spread of about 5–6 points (13–42 %), with a correlation of +0.9 between
+   consecutive samples and +0.4 two seconds later. Averaging over 1 s barely helped and publishing
+   one sample per second only subsampled the noise. This was later traced to the reader, not the
+   charger: the charger's own REST value was a constant 14.0 A while the old sampler's burst-and-rest
+   cycle, locked to the 1 ms system tick, aliased against the 1 kHz PWM. The DMA-based reader
+   (`2026-09-22-low-voltage-cp-reader-design.md`, addendum) replaced it; with it the duty scatter is
+   about 0.09 points. Smoothing still lives with the consumer, where it can be changed without
+   reflashing, but it is no longer needed to remove that wander. The board only publishes unfiltered
+   samples.
 
 ## Message contract
 
@@ -41,7 +44,7 @@ the client is disconnected; the newest sample simply replaces an unsent older on
 | Field | Meaning |
 |---|---|
 | `t` | Board uptime in ms (`millis()`). There is no wall clock (no NTP), so the consumer stamps arrival time itself. |
-| `freq`, `duty`, `adc` | The raw measurement, as in the CSV (`freq_hz`, `duty_pct`, `adc_raw`). |
+| `freq`, `duty`, `adc` | The raw measurement, as in the CSV (`freq_hz`, `duty_pct`, `adc_raw`). `freq` is a measured value with both readers (about 999.9 Hz on the bench, spread 0.05 Hz), not a nominal constant. It is 0 for a static line, and also for a window with edges but too few to measure a period, which the classifier reports as `OUT_OF_RANGE`. |
 | `cp` | The CP classification, with the CSV `state` column's names: `NO_SIGNAL`, `DC_12V`, `PWM_VALID`, `OUT_OF_RANGE`. |
 | `state` | The pilot state the board presents: `A`, `B` or `C` (the CSV `commanded` column). |
 | `amps`, `watts` | From this sample. `null` when `cp` is not `PWM_VALID` or the conversion gives no value; no number is invented. |
@@ -120,14 +123,16 @@ queued behind it wait until the keepalive notices the dead link (about 15 s). Th
   rounding, truncation reported as an error, NaN and infinity never printed as a bare token.
 - **Bench, with `mosquitto_sub -t evsim/cp`:** five messages per second; the status moves through
   `live`, `held` and `zero` as the state and the charger signal change; stopping the broker leaves
-  a continuous CSV; the frequency remains exactly 1000 Hz in the jitter capture with the stream
-  running. The duty spread cannot be used as an acceptance criterion (see Purpose).
+  a continuous CSV. With the DMA reader both the frequency (999.9 Hz, spread 0.05) and the duty
+  (spread 0.09 points) are steady enough to check directly, so the duty spread may now be used as
+  an acceptance criterion; with the original reader it could not (see Purpose).
 
 ## Out of scope
 
 - Any smoothing or averaging on the board.
-- Deciding whether the duty wander is real; a comparison against the charger's REST
-  `SignaledCurrentLimit_vehicleif` can be done from the recorded stream later.
+- Compensating the small constant duty offset of the low-voltage reader (+0.39 points, about
+  +0.23 A at 14 A), which comes from the fixed ADC thresholds and is recorded in the low-voltage
+  reader design's addendum.
 - The inverter side, and choosing what consumes the stream. If the board ends up driving the
   inverter directly, the smoothing and a Modbus client become firmware work in a later design; the
   `setpoint_w` and `status` fields are what such code would need.

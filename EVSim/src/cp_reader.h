@@ -16,7 +16,7 @@ constexpr uint8_t kCpPin = 35;
 
 struct CpSample {
   float duty_pct;    // 0..100 over the window
-  float freq_hz;     // 0 if the line was static
+  float freq_hz;     // 0 if the line was static, or (ADC reader only) if the window held fewer than two rising edges so no frequency can be measured
   uint32_t edges;    // edges seen in the window
   bool level_high;   // line level at the moment of sampling
   uint32_t window_us;

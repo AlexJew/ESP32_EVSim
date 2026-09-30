@@ -181,3 +181,55 @@ host-testable. Flash `-e esp32dev-lowvoltage` and run alongside `tools/charger_p
    setpoints, accepting coarser accuracy than the ISR path per the accepted limitation above.
 3. Pilot state transitions (`A`/`B`/`C` over serial, via the unmodified `pilot_state`/
    `pilot_driver`) still work normally alongside this reader.
+
+## Addendum (2026-09-29): the sampler is DMA-based
+
+**Superseded sections.** The sections above this addendum (the `analogRead` task, "core 0
+is otherwise idle", the stack and priority figures, the sampling-rate table, the data-flow
+description and "Frequency is not measured, by design") describe the ORIGINAL burst
+sampler and are superseded by this addendum.
+
+The original sampler read the ADC in bursts of 20 and rested one FreeRTOS tick between
+bursts, and this document's "Sampling rate and accuracy" section argued the duty stays an
+unbiased estimate. On the bench that was wrong in practice. Against the charger's own REST
+value (a constant 14.0 A, so 23.33 % duty), the duty read by that sampler had an error
+(RMSE) of 11–13 points, ranging 12.6–51.6 %, wandering over several seconds. The mean was
+right; individual 200 ms readings were not.
+
+**Cause.** `analogRead()` takes ~100 µs, so a burst lasted ~2 ms and the burst-plus-rest
+cycle was locked to the 1 ms tick. That is nearly synchronous with the charger's 1 kHz PWM,
+so where each burst landed in the PWM period, and therefore the duty estimate, depended on
+the slowly slipping phase between two clocks. A sampler with no rest gap reached 1.8
+points; random dither added nothing on top.
+
+**Design now.** The I2S built-in ADC mode samples GPIO35 at a fixed rate (~99.2 kHz) into
+DMA buffers, and the duty and frequency are computed from sample counts
+(`lib/cp_adc_level/cp_adc_window`): the duty over whole PWM periods (first to last rising
+edge), the frequency from the same edge indices and the constant sample rate of the I2S
+clock (99 217.7 Hz, from the same crystal as the system timer). The I2S ADC-mode DMA delivers
+adjacent samples in swapped order, so each buffer's pairs are swapped before counting.
+`freq_hz` is now measured, no longer the nominal 1000 Hz. A window with fewer than two
+rising edges has an unknown frequency: `freq_hz` is 0 while `edges > 0`, and the
+classifier treats that as `OUT_OF_RANGE`.
+
+**Task and locking.** The reader task is pinned to core 0 at priority 2 with a 3072-byte
+stack. The window shared with `cp_reader_sample()` is guarded by a spinlock that is held
+for one 512-sample feed (roughly 75–110 µs every 5.2 ms) or for one copy.
+
+**Setup failure.** If the I2S/ADC setup fails, a `#` line is printed, the driver is
+uninstalled and the reader reports a static line forever: `DC_12V` or `NO_SIGNAL`
+according to the level seen at boot, not always `NO_SIGNAL`.
+
+**Final bench result.** With the shipped firmware and the charger signalling a steady
+14.0 A (a true duty of 23.33 %), 4 captures of 300 windows in state C gave 1200 windows,
+every one of them valid. The duty read 23.72 % with a scatter (sd) of 0.087 and a range of
+23.63–23.92 %: a constant offset of +0.39 points (about +0.23 A at 14 A, 14.23 A measured
+against 14.0 A) and an RMSE of about 0.40 points. The frequency read 999.94 Hz (sd 0.05,
+range 999.90–1000.10) from the very first window. 10 consecutive resets showed no WiFi
+reconnects and telemetry every boot. The previous sampler's error was 11–13 points (range
+12.6–51.6 %).
+
+The constant +0.39 point offset comes from the fixed 300/900 ADC thresholds on slow edges.
+It is an accepted limit and is not compensated in firmware. The charger off/on transition
+behaviour (no spike when the signal returns) has host-test coverage only and had not yet
+been checked on the board.

@@ -39,6 +39,16 @@ class _Unauthorized(Exception):
     """Internal signal used to renew an expired REST session."""
 
 
+class _SessionTaken(Exception):
+    """The charger rejected our session and we were not asked to take it back."""
+
+
+SESSION_TAKEN_MESSAGE = (
+    "The charger session was taken by another client (probably the AMTRON page). "
+    "Reconnect here when you are done there."
+)
+
+
 def _as_items(value):
     if isinstance(value, list):
         return value
@@ -114,6 +124,8 @@ class ChargerClient:
         self._lock = threading.RLock()
         self._session_id = None
         self._login_retry_at = 0.0
+        self._yielded = False
+        self._last_activity = None
         self._settings = None
         self._settings_at = None
         self._settings_attempt_at = None
@@ -190,23 +202,52 @@ class ChargerClient:
         self._session_id = session_id
         self._login_retry_at = 0.0
 
-    def _request(self, path, method="GET", payload=None, retried=False):
+    def _request(self, path, method="GET", payload=None, retried=False, takeover=False):
+        """Send an authorized request.
+
+        The charger allows one REST session at a time, so a 401 usually means
+        another client logged in. Background reads (takeover=False) then yield
+        instead of logging in again and evicting that client; only an explicit
+        user action (takeover=True) takes the session back.
+        """
         try:
             return self._open(path, method=method, payload=payload)
         except _Unauthorized:
+            if not takeover:
+                self._yielded = True
+                raise _SessionTaken from None
             if retried:
                 raise ChargerError("Charger authorization failed after one new login.")
             self._login()
-            return self._request(path, method=method, payload=payload, retried=True)
+            return self._request(path, method=method, payload=payload, retried=True, takeover=True)
 
-    def _refresh_settings(self, force=False):
+    def _release_if_idle(self):
+        """Drop the session after a quiet period so the next visit starts a fresh turn."""
+        now = self._clock()
+        if self._last_activity is not None and now - self._last_activity > config.IDLE_RELEASE_S:
+            self._session_id = None
+            self._yielded = False
+        self._last_activity = now
+
+    def reconnect(self):
+        """Explicitly take the charger session, evicting any other client."""
+        with self._lock:
+            self._last_activity = self._clock()
+            self._yielded = False
+            self._session_id = None
+            self._login_retry_at = 0.0
+            self._settings_attempt_at = None
+            self._dashboard_attempt_at = None
+        return self.status()
+
+    def _refresh_settings(self, force=False, takeover=False):
         now = self._clock()
         if not force and self._settings is not None and now - self._settings_at < config.SETTINGS_CACHE_S:
             return
         if not force and self._settings_attempt_at is not None and now - self._settings_attempt_at < config.SETTINGS_CACHE_S:
             return
         self._settings_attempt_at = now
-        values = _field_map(self._request("/json/settings.json"))
+        values = _field_map(self._request("/json/settings.json", takeover=takeover))
         if OPERATOR_KEY not in values or INSTALLATION_KEY not in values:
             raise ChargerError("Charger settings did not contain the current-limit fields.")
         self._settings = values
@@ -252,17 +293,26 @@ class ChargerClient:
                     "meter_current_a": dict(unavailable),
                 }
 
+            self._release_if_idle()
             errors = []
-            try:
-                self._refresh_settings()
-            except ChargerError as exc:
-                self._settings_error = str(exc)
-            try:
-                self._refresh_dashboard()
-            except ChargerError as exc:
-                self._dashboard_error = str(exc)
-            settings_failed = self._settings_error is not None
-            dashboard_failed = self._dashboard_error is not None
+            if not self._yielded:
+                try:
+                    self._refresh_settings()
+                except _SessionTaken:
+                    pass
+                except ChargerError as exc:
+                    self._settings_error = str(exc)
+            if not self._yielded:
+                try:
+                    self._refresh_dashboard()
+                except _SessionTaken:
+                    pass
+                except ChargerError as exc:
+                    self._dashboard_error = str(exc)
+            settings_failed = self._settings_error is not None or self._yielded
+            dashboard_failed = self._dashboard_error is not None or self._yielded
+            if self._yielded:
+                errors.append(SESSION_TAKEN_MESSAGE)
             if self._settings_error:
                 errors.append(self._settings_error)
             if self._dashboard_error:
@@ -275,13 +325,15 @@ class ChargerClient:
                 "signaled_current_a": self._reading(self._dashboard_values[SIGNALLED_KEY], self._dashboard_reading_at[SIGNALLED_KEY], config.DASHBOARD_CACHE_S * 1.5, dashboard_failed),
                 "meter_current_a": self._reading(self._dashboard_values[METER_KEY], self._dashboard_reading_at[METER_KEY], config.DASHBOARD_CACHE_S * 1.5, dashboard_failed),
             }
-            if errors:
+            if self._yielded:
+                overall = "session_taken"
+            elif errors:
                 overall = "stale" if any(reading["value"] is not None for reading in readings.values()) else "unavailable"
             elif any(reading["status"] == "stale" for reading in readings.values()):
                 overall = "stale"
             else:
                 overall = "ok"
-            return {"status": overall, "error": errors[-1] if errors else None, **readings}
+            return {"status": overall, "error": SESSION_TAKEN_MESSAGE if self._yielded else (errors[-1] if errors else None), **readings}
 
     @staticmethod
     def _validate_limit(value, installation_limit):
@@ -298,7 +350,10 @@ class ChargerClient:
         with self._lock:
             if not self.configured:
                 raise ChargerError("Charger credentials are not configured; no write was made.")
-            self._refresh_settings(force=True)
+            # A write is an explicit user action: it takes the charger session.
+            self._last_activity = self._clock()
+            self._yielded = False
+            self._refresh_settings(force=True, takeover=True)
             installation_limit = _integer((self._settings or {}).get(INSTALLATION_KEY))
             self._validate_limit(value, installation_limit)
             # Do not blindly retry a POST after an ambiguous network failure.
@@ -307,19 +362,20 @@ class ChargerClient:
                     "/json/settings.json",
                     method="POST",
                     payload={"params": [{"key": OPERATOR_KEY, "value": value}]},
+                    takeover=True,
                 )
             except ChargerError as write_error:
                 # The request may have reached the controller before the
                 # connection failed. Refresh once to show its actual value, but
                 # never turn an ambiguous response into reported write success.
                 try:
-                    self._refresh_settings(force=True)
+                    self._refresh_settings(force=True, takeover=True)
                 except ChargerError as readback_error:
                     self._settings_error = str(readback_error)
                 raise ChargerError(
                     "The charger did not confirm the write response; check the refreshed setting before retrying."
                 ) from write_error
-            self._refresh_settings(force=True)
+            self._refresh_settings(force=True, takeover=True)
             confirmed = _integer((self._settings or {}).get(OPERATOR_KEY))
             if confirmed != value:
                 raise ChargerError(f"Write was not confirmed; charger reports {confirmed!r} A.")

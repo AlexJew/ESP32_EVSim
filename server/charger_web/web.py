@@ -91,7 +91,11 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
             if self.headers.get("Origin") != expected_origin:
                 self._json(403, {"error": "Cross-origin writes are not allowed."})
                 return
-            if urlsplit(self.path).path != "/api/charger/operator-limit":
+            path = urlsplit(self.path).path
+            if path == "/api/charger/reconnect":
+                self._json(200, client.reconnect())
+                return
+            if path != "/api/charger/operator-limit":
                 self._json(404, {"error": "Not found."})
                 return
             if self.headers.get_content_type() != "application/json":

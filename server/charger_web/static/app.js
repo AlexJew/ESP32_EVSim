@@ -20,8 +20,10 @@ function updateConnection(status, error) {
     stale: "Showing stale readings",
     unavailable: "Charger unavailable",
     not_configured: "Credentials not configured",
+    session_taken: "Charger in use elsewhere",
   };
   badge.textContent = labels[status] || "Charger status unknown";
+  el("reconnect").hidden = status !== "session_taken";
   el("last-updated").textContent = error || "Readings refresh every 2 seconds.";
 }
 
@@ -164,6 +166,13 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+el("reconnect").addEventListener("click", async () => {
+  try {
+    await fetch("/api/charger/reconnect", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  } finally {
+    void refresh();
+  }
+});
 el("refresh").addEventListener("click", () => void refresh());
 void refresh();
 window.setInterval(() => void refresh(), 2000);

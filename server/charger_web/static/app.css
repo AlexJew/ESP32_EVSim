@@ -30,7 +30,7 @@ h1 { font-size: clamp(2rem, 5vw, 3.25rem); letter-spacing: -.045em; margin-botto
 h2 { font-size: 1.15rem; letter-spacing: -.02em; margin-bottom: 0; }
 .subheading { color: var(--muted); margin-bottom: 0; }
 .connection { background: var(--green-pale); border-radius: 999px; color: var(--green-dark); font-size: .8rem; font-weight: 700; padding: 9px 13px; white-space: nowrap; }
-.connection[data-state="stale"], .connection[data-state="unavailable"], .connection[data-state="not_configured"] { background: #fff1dd; color: var(--warning); }
+.connection[data-state="stale"], .connection[data-state="unavailable"], .connection[data-state="not_configured"], .connection[data-state="session_taken"] { background: #fff1dd; color: var(--warning); }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 35px #17221d0a; }
 .limit-panel { padding: 28px; }
 .section-heading { align-items: flex-start; margin-bottom: 26px; }

@@ -121,7 +121,7 @@ class SetpointServerTest(unittest.TestCase):
 
     def test_unusable_messages_are_dropped(self):
         for payload in (b"garbage", b'{"setpoint_w":-5}', b'{"setpoint_w":"x"}',
-                        b'{"setpoint_w":null}', b'{"setpoint_w":11001}'):
+                        b'{"setpoint_w":null}', b'{"setpoint_w":12001}'):
             self.feed(payload)
         self.feed(b'{"setpoint_w":700}')
         self.server.tick()

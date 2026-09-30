@@ -222,7 +222,7 @@ class BenchTest(unittest.TestCase):
     def test_unusable_messages_are_ignored_and_the_server_survives(self):
         self.up()
         bad = [b"garbage", b'{"setpoint_w":-5}', b'{"setpoint_w":"x"}', b'{"setpoint_w":null}',
-               b'{"setpoint_w":11001}']
+               b'{"setpoint_w":12001}']
         end = time.monotonic() + 3.0
         while time.monotonic() < end:
             for payload in bad:

@@ -24,7 +24,11 @@ class ParseCpTest(unittest.TestCase):
         self.assertEqual(parse_cp(b'{"setpoint_w":10060.5}'), 10060.5)
 
     def test_the_cap_itself_is_accepted(self):
-        self.assertEqual(parse_cp(b'{"setpoint_w":11000}'), 11000.0)
+        self.assertEqual(parse_cp(b'{"setpoint_w":12000}'), 12000.0)
+
+    def test_a_full_16a_offer_is_accepted(self):
+        # 16.2 A x 690 V = 11 190 W, what the board reports at the charger's 16 A limit
+        self.assertEqual(parse_cp(b'{"setpoint_w":11190}'), 11190.0)
 
     def test_rejects_unusable_messages(self):
         bad = {
@@ -38,7 +42,7 @@ class ParseCpTest(unittest.TestCase):
             "NaN": b'{"setpoint_w":NaN}',
             "Infinity": b'{"setpoint_w":Infinity}',
             "negative": b'{"setpoint_w":-1}',
-            "just above the cap": b'{"setpoint_w":11000.5}',
+            "just above the cap": b'{"setpoint_w":12000.5}',
             "far above the cap": b'{"setpoint_w":1000000}',
             "integer too large for a float": b'{"setpoint_w":1' + b"0" * 400 + b"}",
             "not UTF-8": b"\xff\xfe\x00\xff",

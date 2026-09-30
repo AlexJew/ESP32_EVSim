@@ -15,7 +15,7 @@ TOPIC_CP = "evsim/cp"                # in: the board's telemetry, QoS 0
 TOPIC_SETPOINT = "evsim/setpoint"    # out: the averaged setpoint, QoS 0, retained
 
 WINDOW_S = 1                         # averaging window, and the tick period
-MAX_SETPOINT_W = 11000               # the charger's 11 kW rating; a larger setpoint_w is dropped, not clamped
+MAX_SETPOINT_W = 12000               # the inverter's 12 kW rating; a larger setpoint_w is dropped, not clamped
 KEEPALIVE_S = 10
 RECONNECT_MIN_S = 1                  # paho's backoff toward an unreachable broker
 RECONNECT_MAX_S = 5

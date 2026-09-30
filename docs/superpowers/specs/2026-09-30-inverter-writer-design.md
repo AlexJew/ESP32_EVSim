@@ -68,7 +68,7 @@ outage. Only `no_data` runs the 120 s clock.
   the status and the error field, and is re-asserted on reconnecting (after a 1 to 5 s backoff), which
   also repairs a write that died half way.
 - **Range.** The cap is limited to 0 to `WMax` (12 000 W, read from the inverter). The server's own input
-  cap of 11 000 W keeps a valid target under it.
+  cap of 12 000 W keeps a valid target under it: a 12 000 W DC target needs only about an 11 650 W AC cap.
 
 ### Failure handling
 

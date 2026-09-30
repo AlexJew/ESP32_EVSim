@@ -215,8 +215,6 @@ class ChargerClient:
 
     def _refresh_dashboard(self, force=False):
         now = self._clock()
-        if not force and self._dashboard is not None and now - self._dashboard_at < config.DASHBOARD_CACHE_S:
-            return
         if not force and self._dashboard_attempt_at is not None and now - self._dashboard_attempt_at < config.DASHBOARD_CACHE_S:
             return
         self._dashboard_attempt_at = now

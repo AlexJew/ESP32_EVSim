@@ -170,9 +170,37 @@ read back), and always commits a cap with the `Ena` write. Tests run against a f
 one: `cd server && .venv/bin/python -m unittest discover -s tests -p 'test_fronius*.py'`. Default host
 192.168.21.120. The code lives in `server/setpoint_server/fronius.py` and `fronius_cli.py`; the tool is a shim.
 
-## Still to test before relying on it
+## Live check of the server driving the inverter, 2026-09-30
 
-- How fast the inverter follows a raised cap and a lowered one (timing at sub-second resolution).
-- What it does when the offered power drops below the cap.
-- Write rate limits (how often the cap can be re-committed) and how `RvrtTms` behaves.
-- An independent check of the DC power (AMTRON meter or analyser).
+`python -m setpoint_server --inverter 192.168.21.120` against the lab broker, the real board and the real inverter,
+with the AMTRON offering 10 to 12 A (7 to 8.5 kW).
+
+- **It tracks.** Target 7 751 W: DC input 7 742-7 776 W (within 0.3 %). Later 8 452 W target: 8 480 W DC (+28 W).
+  Counting the ramps after each step, 87 % of samples were within 100 W; the median error was +4 W.
+- **Steps settle in 2 to 3 s** (DC within 100 W of the new target) for every change of 500 W or more, including
+  the operator's limit changes (about 7.9 -> 8.5 -> 6.4 -> 8.5 kW).
+- **The dead-band keeps the writes calm:** 8 real cap changes (50 W or more) in 3 minutes; the rest was the 10 s
+  refresh moving the cap by about 1 W. No errors and no `unreachable` status anywhere.
+- **Board outage:** the server went to `zero` (0 % cap) within 1 s of the last board message. The board reboots into
+  pilot state A, which is a *valid* 0 W target, so the server stayed `capped` at 0 W (not an outage, no standby).
+  Not isolated: the charger drops its contactor when the board's pilot opens, so the DC also vanished for that reason.
+- **Resume:** after `B` then `C` on `evsim/cmd/state` the server re-applied the cap at once, while the inverter was
+  still asleep. The inverter then restarted by itself, SLEEPING (about 50 s), OFF (about 25 s), STARTING (about 30 s),
+  MPPT, and was at full power about **two minutes** after the `C` command. Any loss of DC (a limit change that drops
+  the contactor, a board reboot) costs this minute or two.
+- **Ctrl-C:** `server_offline` is published, then the 0 % cap is written, and the server exits in about 2 s; the
+  inverter then reads `WMaxLimPct=0 Ena=1`.
+- **Write rate:** 60 cap commits at 1 Hz (alternating 5 000 and 5 100 W) gave **0 errors**, so the inverter tolerates
+  the once-a-second commit the writer can produce.
+
+## Still open
+
+- The 120 s standby fallback and the 0 % cap on no data were not exercised live (bench tests and the earlier
+  floor test cover them); the outage was 13 s and coincided with the contactor opening.
+- Timing below 1 s (the status is once a second), and what the inverter does when the *offered* power falls below a cap
+  that is still higher than the offer.
+- How `RvrtTms` behaves, and an independent check of the DC power (AMTRON meter or analyser).
+- **Amps to watts:** the board turns offered current into watts as amps x 690 V, but the rectified DC voltage sags to
+  about 510 V, so the same current is about 630 W per amp of DC power. Following the 690 V figure exactly would draw
+  7 to 10 % more current than offered. Decide: convert with the measured DC voltage (or about 630 W/A), or regulate
+  the DC current instead of the power.

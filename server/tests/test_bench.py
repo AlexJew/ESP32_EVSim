@@ -16,6 +16,8 @@ import threading
 import time
 import unittest
 
+from fake_inverter import FakeInverter, M123
+
 try:
     import paho.mqtt.client as mqtt
 except ImportError:
@@ -27,6 +29,8 @@ MOSQUITTO = shutil.which("mosquitto") or (
 SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOPIC_CP = "evsim/cp"
 TOPIC_SETPOINT = "evsim/setpoint"
+TOPIC_INVERTER = "evsim/inverter"
+CONN, PCT, ENA = M123 + 2, M123 + 3, M123 + 7
 READY = "subscribed to evsim/cp"
 
 
@@ -45,11 +49,11 @@ def new_client():
 class Watcher:
     """Records every evsim/setpoint message with its arrival time and retain flag."""
 
-    def __init__(self, port):
+    def __init__(self, port, topic=TOPIC_SETPOINT):
         self._lock = threading.Lock()
         self._messages = []  # (monotonic time, retain, decoded JSON)
         self._client = new_client()
-        self._client.on_connect = lambda c, u, f, rc, p: c.subscribe(TOPIC_SETPOINT, qos=1)
+        self._client.on_connect = lambda c, u, f, rc, p: c.subscribe(topic, qos=1)
         self._client.on_message = self._on_message
         self._client.connect_async("127.0.0.1", port)
         self._client.loop_start()
@@ -136,11 +140,11 @@ class BenchTest(unittest.TestCase):
                 time.sleep(0.1)
         self.fail("the private Mosquitto did not start")
 
-    def start_server(self):
+    def start_server(self, *extra):
         log = open(self.logpath, "a")
         self.addCleanup(log.close)
         self.server = subprocess.Popen(
-            [sys.executable, "-u", "-m", "setpoint_server", "--port", str(self.port)],
+            [sys.executable, "-u", "-m", "setpoint_server", "--port", str(self.port)] + list(extra),
             cwd=SERVER_DIR, stdout=log, stderr=log,
         )
 
@@ -311,6 +315,70 @@ class BenchTest(unittest.TestCase):
         self.feeder.feed(10000, 3.0)
         last = self.watcher.last()
         self.assertEqual((last["status"], last["setpoint_w"]), ("ok", 10000))
+
+
+    # -- driving the inverter (against a fake one) ----------------------------------------
+
+    def start_with_inverter(self, *extra):
+        self.inverter = FakeInverter()
+        inverter_port = self.inverter.start()
+        self.addCleanup(self.inverter.stop)
+        self.start_broker()
+        self.start_clients()
+        self.start_server("--inverter", "127.0.0.1", "--inverter-port", str(inverter_port), *extra)
+        self.assertTrue(self.wait_for_log(READY, 10), self.log_text())
+
+    def wait_until(self, predicate, timeout):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.1)
+        return predicate()
+
+    def test_a_setpoint_becomes_a_cap_on_the_inverter(self):
+        self.start_with_inverter()
+        self.feeder.feed(4000, 3.5)
+        self.assertTrue(self.wait_until(
+            lambda: self.inverter.regs[PCT] == 3233 and self.inverter.regs[ENA] == 1, 4), self.log_text())
+
+    def test_silence_gives_a_zero_cap_then_standby_and_data_resumes(self):
+        self.start_with_inverter("--standby-after", "4")
+        self.feeder.feed(4000, 2.5)
+        self.assertTrue(self.wait_until(lambda: self.inverter.regs[PCT] == 3233, 4), self.log_text())
+        self.assertTrue(self.wait_until(lambda: self.inverter.regs[PCT] == 0, 8), self.log_text())
+        self.assertTrue(self.wait_until(lambda: self.inverter.regs[CONN] == 0, 12), self.log_text())
+        self.feeder.feed(4000, 3.5)
+        self.assertTrue(self.wait_until(
+            lambda: self.inverter.regs[CONN] == 1 and self.inverter.regs[PCT] == 3233, 8), self.log_text())
+
+    def test_the_inverter_status_is_published_once_a_second(self):
+        self.start_with_inverter()
+        status = Watcher(self.port, TOPIC_INVERTER)     # created once the broker is up, so it connects at once
+        self.addCleanup(status.stop)
+        time.sleep(0.5)
+        self.feeder.feed(4000, 4.5)
+        messages = status.snapshot()
+        self.assertGreaterEqual(len(messages), 3, self.log_text())
+        self.assertTrue(any(p["mode"] == "capped" and p["target_dc_w"] == 4000 and p["dc_w"] == 7272
+                            for _, _, p in messages), messages[-1])
+
+    def test_sigterm_leaves_the_inverter_at_a_zero_cap(self):
+        self.start_with_inverter()
+        self.feeder.feed(4000, 3.0)
+        self.assertTrue(self.wait_until(lambda: self.inverter.regs[PCT] == 3233, 4), self.log_text())
+        self.server.terminate()
+        self.assertEqual(self.server.wait(timeout=8), 0)
+        self.assertEqual((self.inverter.regs[PCT], self.inverter.regs[ENA]), (0, 1))
+
+    def test_without_the_flag_no_inverter_status_appears(self):
+        self.up()
+        status = Watcher(self.port, TOPIC_INVERTER)
+        self.addCleanup(status.stop)
+        time.sleep(0.5)
+        self.feeder.feed(4000, 3.0)
+        self.assertGreater(len(self.watcher.snapshot()), 0)     # the server is running and publishing
+        self.assertEqual(status.snapshot(), [])
 
 
 if __name__ == "__main__":

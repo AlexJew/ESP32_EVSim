@@ -61,8 +61,8 @@ calibration factor may be needed later.
 
 **Fail-safe caveat:** when a revert timer expires, the cap is removed and the inverter then draws everything it
 can from the charger. The hardware timer is therefore not a safe fallback here. On `no_data` or
-`server_offline` the writer must **write an explicit low value itself** (0 % or `Conn` = 0, to be tested on the
-unit), and keep rewriting the cap as a heartbeat.
+`server_offline` the writer must **write an explicit stop itself**, and keep rewriting the cap as a
+heartbeat. See "Zero behaviour" below for which stop works.
 
 Useful read-only registers: model 103 `W` (AC power, SF 0) at 40083; model 160 modules at 40263 (MPPT 1) and
 40283 (MPPT 2), 20 registers each (`DCA` +9, `DCV` +10, `DCW` +11, scale factors in the first three registers
@@ -83,5 +83,29 @@ accurate, fast AC ceiling; no revert timer was set (`RvrtTms` still 0).
 (8.5 kW) after the write, so the inverter is now held below the offer. Remove it by writing `WMaxLim_Ena` = 0
 (register 40236) and `WMaxLimPct` = 10000 (40232), or press "Reset Modbus API Control" in the web UI.
 
-Still to test before relying on it: what 0 % does versus `Conn` = 0, the response time when the cap is raised,
-and how the cap behaves when the offered power drops below it.
+## Zero behaviour, 2026-09-30 (tested on the unit)
+
+- **`WMaxLimPct` = 0 does NOT stop the inverter.** With `WMaxLim_Ena` = 1 the register reads back 0, but the
+  effective limit silently stays at the previous value (AC stayed at 7 048 W for 25 s). Never use 0 as "off". The
+  smallest value the inverter honours is still to be found (1 % and 0.1 % untested).
+- **`Conn` = 0 (standby) works:** AC and DC fall to 0 W within about 1.6 s, state 8 STANDBY, and the DC voltage
+  rises to its open-circuit value (about 558 V, peak 594 V). The charger did not react: the pilot stayed in state
+  C with a valid PWM, still offering about 8.5 kW, for the whole test including about 50 s at zero draw.
+- **Coming back is slow: about 57 s.** After `Conn` = 1: state 1 OFF for about 24 s, then 3 STARTING for about
+  24 s, then MPPT, and the AC output reached the cap at about 57 s. So `Conn` = 0 is a hard stop for rare
+  events only (leaving state C, link loss, hold expiry). It cannot follow short gaps; the board's held setpoint
+  already covers the charger's 6-12 s gaps.
+- **Scale factors change at run time.** During start-up the model 160 DC power register read 10x too large
+  (63 944 for about 6 394 W) because its scale factor changed. Re-read the scale factors with every read, never
+  cache them.
+
+The test restored the state (Conn 1, cap on at 5875) and the final AC was 7 045 W.
+
+## Still to test before relying on it
+
+- The smallest cap value the inverter honours (1 %, 0.1 %).
+- DC-versus-AC calibration across the range (the setpoint is the DC power taken from the charger, so the AC cap
+  must be the setpoint times the inverter's efficiency at that power). Points so far, AC/DC: 6 825/6 991 W,
+  7 047/7 268 W, 9 748/10 108 W, 9 773/10 063 W, about 96.4-97.6 %.
+- How fast the inverter follows a raised cap, and what it does when the offered power drops below the cap.
+- Whether the pilot side ever reacts to a low draw over a longer time.

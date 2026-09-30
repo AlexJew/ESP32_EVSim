@@ -259,6 +259,48 @@ class BenchTest(unittest.TestCase):
         self.assertTrue(recovered, self.log_text())
         self.assertIsNone(self.server.poll())
 
+    def test_a_tick_during_a_disconnect_is_not_replayed_after_reconnecting(self):
+        # paho closes the socket, runs on_disconnect, and only then makes
+        # is_connected() False. A tick landing in that gap saw "connected"; at
+        # QoS 1 paho queued it and replayed it, retained, when the broker came
+        # back: a pre-outage `ok` setpoint with the board long silent.
+        from setpoint_server.server import SetpointServer
+
+        self.start_broker()
+        self.start_clients()
+        client = new_client()
+        server = SetpointServer(client)
+        on_disconnect = client.on_disconnect
+
+        def tick_then_log(*args):
+            server.tick()
+            on_disconnect(*args)
+
+        client.on_disconnect = tick_then_log
+        client.connect_async("127.0.0.1", self.port)
+        client.loop_start()
+        self.addCleanup(lambda: (client.loop_stop(), client.disconnect()))
+
+        def wait_connected(timeout):
+            deadline = time.monotonic() + timeout
+            while not client.is_connected() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            return client.is_connected()
+
+        self.assertTrue(wait_connected(5))
+        self.feeder.feed(10000, 1.2)  # fresh samples: still in the window when the link drops
+        before = len(self.watcher.snapshot())
+        self.broker.kill()
+        self.broker.wait(timeout=5)
+        time.sleep(1.5)
+        self.start_broker()
+        self.assertTrue(wait_connected(10))
+        time.sleep(2.0)  # any replay has arrived, and the old samples have aged out
+        server.tick()    # a fresh tick proves the watcher is receiving again
+        self.assertTrue(self.watcher.wait_for(self.status_is("no_data"), 8))
+        statuses = [p["status"] for _, _, p in self.watcher.snapshot()[before:]]
+        self.assertNotIn("ok", statuses)
+
     def test_the_server_can_start_before_the_broker_exists(self):
         self.start_server()
         time.sleep(2.0)

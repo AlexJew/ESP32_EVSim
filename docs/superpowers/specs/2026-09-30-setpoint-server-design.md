@@ -35,7 +35,12 @@ is treated as a corrupt or foreign message. The server drops it (see Failure han
 11 000 W, so it never publishes a load the charger did not offer. The cap is a named constant in
 `config.py`.
 
-**Output** — topic `evsim/setpoint`, QoS 1, **retained**, one message per second:
+**Output** — topic `evsim/setpoint`, **QoS 0**, **retained**, one message per second. QoS 0 is
+deliberate, and was QoS 1 in the first draft: paho queues a QoS 1 publish it cannot send yet, or one
+still unacknowledged when the link drops, and replays it after reconnecting. With the retained flag
+that puts a stale pre-outage setpoint on the topic, the one thing this server must never do. paho
+drops QoS 0 instead, and the next tick replaces the value within a second. The `server_offline`
+message (last-will and clean stop) stays at QoS 1, since it is sent once and must arrive.
 
 ```json
 {"setpoint_w":10060,"samples":5,"window_s":1,"status":"ok","ts":"2026-09-30T13:42:07Z"}
@@ -109,7 +114,7 @@ tests use the standard library's `unittest`, so they add no dependency of their 
 1. The MQTT thread receives an `evsim/cp` message, `parse_cp` extracts `setpoint_w`, and the sample is
    added to the averager with the arrival time.
 2. Every second the tick asks the averager for the count and mean, builds the message with the right
-   status, and publishes it retained at QoS 1.
+   status, and publishes it retained at QoS 0.
 3. The tick is scheduled against a monotonic clock, so a slow publish does not accumulate drift.
 
 ### Connection
@@ -137,6 +142,9 @@ spec. The server needs no extra listener setup.
   11 000 W:** the
   message is logged and dropped. It does not enter the average and does not stop the loop. A window
   made only of such messages is `no_data`.
+- **A retained `evsim/cp` message** is ignored the same way. The board never retains it, so a retained
+  copy (which the broker delivers on every subscribe, for example after a bench `mosquitto_pub -r`) is
+  stale by definition and must not count as a live sample.
 - **No samples in the window:** `no_data`, `setpoint_w` 0 (see the status rules).
 - **Broker down or unreachable:** the tick keeps running; publishes that cannot be sent are logged and
   skipped, and paho retries the connection. On return the first tick is `no_data` until samples flow

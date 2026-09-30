@@ -1,7 +1,7 @@
 # Setpoint server
 
 Subscribes to the board's `evsim/cp`, averages `setpoint_w` over 1 s, and publishes
-the result on `evsim/setpoint` (QoS 1, retained) for the Fronius inverter.
+the result on `evsim/setpoint` (QoS 0, retained) for the Fronius inverter.
 
 Design: `docs/superpowers/specs/2026-09-30-setpoint-server-design.md`.
 

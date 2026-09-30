@@ -65,8 +65,8 @@ class FakeClock:
         return self.t
 
 
-def message(payload):
-    return SimpleNamespace(topic=config.TOPIC_CP, payload=payload)
+def message(payload, retain=False):
+    return SimpleNamespace(topic=config.TOPIC_CP, payload=payload, retain=retain)
 
 
 class SetpointServerTest(unittest.TestCase):
@@ -95,7 +95,7 @@ class SetpointServerTest(unittest.TestCase):
         self.client.on_connect(self.client, None, {}, REFUSED, None)
         self.assertEqual(self.client.subscribed, [])
 
-    def test_tick_publishes_the_mean_retained_at_qos1(self):
+    def test_tick_publishes_the_mean_retained_at_qos0(self):
         self.feed(b'{"setpoint_w":1000}')
         self.clock.t = 100.2
         self.feed(b'{"setpoint_w":2000}')
@@ -103,14 +103,14 @@ class SetpointServerTest(unittest.TestCase):
         self.server.tick()
         self.assertEqual(
             self.client.published,
-            [(config.TOPIC_SETPOINT, format_setpoint(2, 1500.0, config.WINDOW_S, NOW), 1, True)],
+            [(config.TOPIC_SETPOINT, format_setpoint(2, 1500.0, config.WINDOW_S, NOW), 0, True)],
         )
 
     def test_tick_with_no_samples_publishes_no_data(self):
         self.server.tick()
         self.assertEqual(
             self.client.published,
-            [(config.TOPIC_SETPOINT, format_setpoint(0, None, config.WINDOW_S, NOW), 1, True)],
+            [(config.TOPIC_SETPOINT, format_setpoint(0, None, config.WINDOW_S, NOW), 0, True)],
         )
 
     def test_old_samples_do_not_leak_into_a_later_tick(self):
@@ -129,6 +129,13 @@ class SetpointServerTest(unittest.TestCase):
             self.client.published[-1][1],
             format_setpoint(1, 700.0, config.WINDOW_S, NOW),
         )
+
+    def test_a_retained_cp_message_is_not_a_live_sample(self):
+        # The board never retains evsim/cp, so a retained copy delivered on
+        # subscribe is stale by definition (e.g. a bench `mosquitto_pub -r`).
+        self.client.on_message(self.client, None, message(b'{"setpoint_w":10000}', retain=True))
+        self.server.tick()
+        self.assertIn('"status":"no_data"', self.client.published[-1][1])
 
     def test_tick_publishes_nothing_while_disconnected(self):
         self.client.connected = False

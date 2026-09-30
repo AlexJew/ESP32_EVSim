@@ -1325,3 +1325,10 @@ EOF
 - **Placeholders:** none. Every step has its code or exact command.
 - **Type consistency:** `WindowAverager.add/average/__len__`, `parse_cp`, `format_setpoint(count, mean, window_s, now_utc)`, `offline_payload(window_s)`, `SetpointServer.tick/run/request_stop/shutdown` and the `config` names are used with the same signatures in every task.
 - **Review Focus:** items 1 and 2 are pinned by `test_rejects_unusable_messages`; item 3 by `test_tick_publishes_nothing_while_disconnected`; item 4 by `test_shutdown_while_disconnected_neither_publishes_nor_waits`; item 5 by `test_subscribes_on_every_connect`, `test_the_server_recovers_from_a_broker_restart` and `test_the_server_can_start_before_the_broker_exists`.
+
+## Amendments after the final review
+
+The whole-branch review found two problems the plan's tests missed. Both are fixed on the branch, test first, and the spec is updated to match:
+
+- **Ticks are published at QoS 0, not QoS 1.** paho queues a QoS 1 publish it cannot send yet, or one still unacknowledged when the link drops, and replays it retained after reconnecting; `is_connected()` is still True for a moment after the socket closes, so the "not connected" guard could not stop it. The Global Constraints line "Output topic `evsim/setpoint`, QoS 1, retained" is superseded: it is QoS 0, retained. The last-will and the clean-stop `server_offline` stay QoS 1. Pinned by `test_a_tick_during_a_disconnect_is_not_replayed_after_reconnecting` and `test_tick_publishes_the_mean_retained_at_qos0`.
+- **A retained `evsim/cp` message is ignored** (the board never retains it). Pinned by `test_a_retained_cp_message_is_not_a_live_sample`.

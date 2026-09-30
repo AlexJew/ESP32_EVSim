@@ -12,7 +12,7 @@ BROKER_PORT = 1883
 CLIENT_ID = "evsim-setpoint-server"
 
 TOPIC_CP = "evsim/cp"                # in: the board's telemetry, QoS 0
-TOPIC_SETPOINT = "evsim/setpoint"    # out: the averaged setpoint, QoS 1, retained
+TOPIC_SETPOINT = "evsim/setpoint"    # out: the averaged setpoint, QoS 0, retained
 
 WINDOW_S = 1                         # averaging window, and the tick period
 MAX_SETPOINT_W = 11000               # the charger's 11 kW rating; a larger setpoint_w is dropped, not clamped

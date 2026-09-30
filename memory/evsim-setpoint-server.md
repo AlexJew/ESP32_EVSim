@@ -8,7 +8,7 @@ metadata:
 A Python server in `server/` on the development computer (192.168.21.137). It subscribes to the
 board's `evsim/cp`, takes the mean of `setpoint_w` over the last 1 s, and publishes
 `{"setpoint_w":...,"samples":...,"window_s":1,"status":"ok|no_data|server_offline","ts":...}` on
-`evsim/setpoint` (QoS 1, retained) once per second. No data in the window means 0 W, never the last
+`evsim/setpoint` (QoS 0, retained: QoS 1 would replay a stale setpoint after a reconnect) once per second. No data in the window means 0 W, never the last
 value. A `setpoint_w` above 11 000 W (the charger's rating) is dropped as a corrupt message, not
 clamped. Design: `docs/superpowers/specs/2026-09-30-setpoint-server-design.md`.
 
@@ -21,5 +21,6 @@ design; anything smoother is a later change here, not on the board. Run it with
 `cd server && .venv/bin/python -m setpoint_server`; see `server/README.md`.
 
 **Watch the cap:** the board's watts come from amps x 690 V (3 x 230 V), so a full 16 A offer is about
-11 040 W, just over the 11 000 W cap, and would be dropped (0 W, `no_data`). Fine at the 14 A bench
-setting (about 9.8 kW); revisit `MAX_SETPOINT_W` in `server/setpoint_server/config.py` before offering 16 A.
+11 040 W, just over the 11 000 W cap. Samples above it are dropped, so near the cap the output is a
+low-biased mean of only the samples under it, and `no_data` (0 W) in any window where every sample is over.
+Fine at the 14 A bench setting (about 9.8 kW); revisit `MAX_SETPOINT_W` in `server/setpoint_server/config.py` before offering 16 A.

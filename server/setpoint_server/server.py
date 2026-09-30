@@ -52,6 +52,11 @@ class SetpointServer:
         log.warning("disconnected from the broker: %s", reason_code)
 
     def _on_message(self, client, userdata, msg):
+        if msg.retain:
+            # The board never retains evsim/cp, so a retained copy (delivered on
+            # every subscribe) is stale by definition, not a live sample.
+            log.warning("ignoring retained %s message", msg.topic)
+            return
         watts = parse_cp(msg.payload)
         if watts is None:
             log.warning("dropping unusable %s message: %r", msg.topic, bytes(msg.payload[:80]))
@@ -65,11 +70,14 @@ class SetpointServer:
             count, mean = self._averager.average(self._clock())
         payload = format_setpoint(count, mean, config.WINDOW_S, self._utcnow())
         if not self._client.is_connected():
-            # Publishing now would make paho queue it and replay every stale
-            # setpoint in a burst on reconnect.
             log.warning("broker not connected; skipping %s", payload)
             return
-        info = self._client.publish(config.TOPIC_SETPOINT, payload, qos=1, retain=True)
+        # QoS 0 on purpose. paho queues a QoS 1 publish it cannot send yet, or one
+        # still unacknowledged when the link drops, and replays it retained after
+        # reconnecting: a stale pre-outage setpoint. is_connected() is still True
+        # for a moment after the socket closes, so the check above cannot stop that.
+        # paho drops QoS 0 instead, and the next tick replaces the value within 1 s.
+        info = self._client.publish(config.TOPIC_SETPOINT, payload, qos=0, retain=True)
         if info.rc != 0:
             log.warning("publish failed (rc=%s): %s", info.rc, payload)
             return

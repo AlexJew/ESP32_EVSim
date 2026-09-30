@@ -202,5 +202,5 @@ with the AMTRON offering 10 to 12 A (7 to 8.5 kW).
 - How `RvrtTms` behaves, and an independent check of the DC power (AMTRON meter or analyser).
 - **Amps to watts:** the board turns offered current into watts as amps x 690 V, but the rectified DC voltage sags to
   about 510 V, so the same current is about 630 W per amp of DC power. Following the 690 V figure exactly would draw
-  7 to 10 % more current than offered. Decide: convert with the measured DC voltage (or about 630 W/A), or regulate
-  the DC current instead of the power.
+  7 to 10 % more current than offered. **Decided 2026-09-30 (not yet implemented):** convert with the measured DC voltage,
+  target = 1.2247 x amps x V_dc (about 630 W/A); see [[evsim-amps-to-watts]].

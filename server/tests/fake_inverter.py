@@ -4,6 +4,7 @@ The SunSpec layout is copied from the real GEN24 12.0 Plus SC read on 2026-09-30
 write. Used by the client, writer and bench tests; nothing here touches the real inverter.
 """
 
+import socket
 import socketserver
 import struct
 import threading
@@ -22,7 +23,9 @@ class FakeInverter:
     def __init__(self, with_123=True):
         self.regs = {a: 0 for a in range(40000, END + 2)}
         self.writes = []            # (address, value), in order
-        self.refuse_writes = False  # answer writes with Modbus exception 3
+        self.refuse_writes = False  # answer every write with Modbus exception 3
+        self.refuse = set()         # addresses whose writes get exception 3
+        self.clients = []           # open connections, closed by stop()
         self._chain(with_123)
         self._values()
         self._server = None
@@ -76,6 +79,7 @@ class FakeInverter:
                 return buf
 
             def handle(self):
+                fake.clients.append(self.request)
                 while True:
                     head = self.recv(7)
                     if head is None:
@@ -102,7 +106,7 @@ class FakeInverter:
                 if fc == 6:
                     addr, value = struct.unpack(">HH", body[1:5])
                     fake.writes.append((addr, value))
-                    if fake.refuse_writes or addr not in fake.regs:
+                    if fake.refuse_writes or addr in fake.refuse or addr not in fake.regs:
                         return exc(3)
                     fake.regs[addr] = value
                     return frame(body[:5])
@@ -115,5 +119,10 @@ class FakeInverter:
         return self._server.server_address[1]
 
     def stop(self):
+        for client in list(self.clients):
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         self._server.shutdown()
         self._server.server_close()

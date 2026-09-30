@@ -64,7 +64,9 @@ outage. Only `no_data` runs the 120 s clock.
   adds up to 100 W. Consequence, accepted: the DC draw can sit up to about 100 W from the setpoint.
 - **Refresh every 10 s.** The current cap is re-committed (value, then `Ena` = 1) every 10 s even without a
   change, so an inverter reset or a press of "Reset Modbus API Control" cannot silently drop it.
-- **Read back every write.** A mismatch is retried once, then reported in the status and the error field.
+- **Read back every write.** A failed write or a read-back mismatch closes the connection, is reported in
+  the status and the error field, and is re-asserted on reconnecting (after a 1 to 5 s backoff), which
+  also repairs a write that died half way.
 - **Range.** The cap is limited to 0 to `WMax` (12 000 W, read from the inverter). The server's own input
   cap of 11 000 W keeps a valid target under it.
 

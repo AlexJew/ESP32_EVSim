@@ -17,7 +17,7 @@ import socket
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server"))
-from charger_web.modbus import ModbusError, ModbusTcp  # noqa: E402
+from charger_web.modbus import ModbusError, ModbusTcp, ModbusTransportError  # noqa: E402
 
 
 def main():
@@ -41,14 +41,24 @@ def main():
 
 
 def scan(modbus, args, unit):
-    total, errors = 0, {}
+    total, errors, silent = 0, {}, 0
     for table in ("holding", "input") if args.table == "both" else (args.table,):
-        print(f"# {table} registers {args.start}-{args.end} unit {unit}")
+        print(f"# {table} registers {args.start}-{args.end} unit {unit}", flush=True)
         for base in range(args.start, args.end + 1, args.block):
             count = min(args.block, args.end + 1 - base)
+            if silent >= 3:
+                print(f"# unit {unit}: the charger stopped answering (3 timeouts in a row); skipping the rest", file=sys.stderr)
+                break
             try:
                 values = modbus.read(base, count, table)
                 found = list(enumerate(values, base))
+                silent = 0
+            except ModbusTransportError as exc:
+                # No reply at all: retrying register by register would only wait again.
+                silent += 1
+                errors[str(exc)] = errors.get(str(exc), 0) + 1
+                print(f"# no reply at {table} {base}: {exc}", file=sys.stderr, flush=True)
+                continue
             except ModbusError:
                 found = []
                 for address in range(base, base + count):
@@ -58,7 +68,7 @@ def scan(modbus, args, unit):
                         errors[str(exc)] = errors.get(str(exc), 0) + 1
             for address, value in found:
                 total += 1
-                print(f"{table}\t{address}\t{value}\t0x{value:04x}")
+                print(f"{table}\t{address}\t{value}\t0x{value:04x}", flush=True)
     print(f"# unit {unit}: {total} registers answered", file=sys.stderr)
     for message, n in sorted(errors.items(), key=lambda item: -item[1])[:3]:
         print(f"#   {n}x {message}", file=sys.stderr)

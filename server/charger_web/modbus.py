@@ -12,6 +12,10 @@ class ModbusError(IOError):
     """Communication failure or Modbus exception response."""
 
 
+class ModbusTransportError(ModbusError):
+    """No usable reply: timeout, reset or refused connection (not a Modbus exception)."""
+
+
 class ModbusTcp:
     """One TCP connection, opened on first use and reopened after any failure.
 
@@ -35,7 +39,7 @@ class ModbusTcp:
         while len(buf) < n:
             chunk = self._sock.recv(n - len(buf))
             if not chunk:
-                raise ModbusError("connection closed by the charger")
+                raise ModbusTransportError("connection closed by the charger")
             buf += chunk
         return buf
 
@@ -51,7 +55,7 @@ class ModbusTcp:
             body = self._recv(length - 1)
         except (OSError, struct.error) as exc:
             self.close()
-            raise ModbusError(f"Could not reach the charger over Modbus: {exc}") from exc
+            raise ModbusTransportError(f"Could not reach the charger over Modbus: {exc}") from exc
         if body[0] == fc | 0x80:
             raise ModbusError(f"Modbus exception {body[1]} (function {fc})")
         if body[0] != fc:

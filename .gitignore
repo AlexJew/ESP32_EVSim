@@ -10,3 +10,7 @@ tools/*.csv
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
 tools/__pycache__/
+
+# Setpoint server (Python)
+server/.venv/
+server/**/__pycache__/

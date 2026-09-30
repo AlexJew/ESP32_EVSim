@@ -24,3 +24,26 @@ design; anything smoother is a later change here, not on the board. Run it with
 11 040 W, just over the 11 000 W cap. Samples above it are dropped, so near the cap the output is a
 low-biased mean of only the samples under it, and `no_data` (0 W) in any window where every sample is over.
 Fine at the 14 A bench setting (about 9.8 kW); revisit `MAX_SETPOINT_W` in `server/setpoint_server/config.py` before offering 16 A.
+
+## Deferred review findings (2026-09-30)
+
+Minor issues from the final review that were not fixed. None affects the bench setup today; fix them before
+the server is relied on unattended.
+
+- **Mac sleep:** `time.monotonic` (macOS `mach_absolute_time`) stops during sleep, so samples from just before
+  sleep are still "in the window" on wake. The first tick can publish that stale `ok` with a fresh `ts`.
+  Fix: `time.clock_gettime(time.CLOCK_MONOTONIC)` on macOS (counts sleep). Matters if the computer running the
+  broker and this server ever sleeps.
+- **Two server copies:** they do not take over once, as the spec says. Each reconnect kicks the other off,
+  about once a second, so `evsim/setpoint` flickers between the value and 0 W (safe direction, but noisy).
+  Fix: correct the spec wording, or exit when the session is taken over.
+- **Signal handler:** it calls `Event.set()`, which can deadlock if SIGINT/SIGTERM lands while the main thread
+  holds the Event's lock inside `wait()`. Tiny chance; only SIGKILL recovers. Fix: set a plain flag, or use a
+  helper thread.
+- **Shutdown log:** `shutdown()` logs "published server_offline" even when `wait_for_publish` timed out. Fix:
+  log from `info.is_published()`.
+- **Test gaps:** only SIGTERM is benched (not Ctrl-C), and stopping while the broker is down is not benched.
+- **Outage logging:** no `on_connect_fail` handler, so the reason a broker is unreachable never reaches the log,
+  and an outage logs one warning per second.
+
+Also not seen on hardware yet: the held setpoint through the charger's 6-12 s gaps (the bench run was 8 s).

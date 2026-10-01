@@ -159,5 +159,157 @@ class ReadTest(ServiceTest):
         self.assertIsNotNone(stalled.status()["error"])
 
 
+class WriteTest(ServiceTest):
+    def test_set_limit_writes_register_1000_and_confirms_it(self):
+        self.service.poll_once()
+        result = self.service.set_limit(8)
+        self.assertEqual((result["success"], result["set_limit_a"]), (True, 8))
+        self.assertEqual(self.fake.writes, [(1000, 8)])
+        self.assertEqual(self.fake.regs[1000], 8)
+        s = self.service.status()
+        self.assertEqual((s["set_limit_a"]["value"], s["desired_limit_a"]), (8, 8))
+
+    def test_zero_is_accepted(self):
+        self.service.poll_once()
+        self.assertEqual(self.service.set_limit(0)["set_limit_a"], 0)
+        self.assertEqual(self.fake.writes, [(1000, 0)])
+
+    def test_invalid_limits_are_rejected_before_any_write(self):
+        self.service.poll_once()
+        for bad in (5, 1, -1, 17, 7.5, 8.0, True, False, "8", None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(LimitValidationError):
+                    self.service.set_limit(bad)
+        self.assertEqual(self.fake.writes, [])
+
+    def test_the_installation_limit_caps_the_choice_and_defaults_to_16(self):
+        self.fake.regs[133] = 10
+        self.service.poll_once()
+        with self.assertRaises(LimitValidationError) as cm:
+            self.service.set_limit(12)
+        self.assertIn("installation limit of 10 A", str(cm.exception))
+        self.assertEqual(self.fake.writes, [])
+        self.fake.refuse_reads = {133}                 # unreadable: the ceiling is 16
+        self.service.poll_once()
+        self.assertEqual(self.service.set_limit(12)["set_limit_a"], 12)
+
+    def test_a_refused_write_is_an_error_and_sets_no_desired_limit(self):
+        self.service.poll_once()
+        self.fake.refuse_writes = True
+        with self.assertRaises(ChargerError):
+            self.service.set_limit(8)
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+
+    def test_an_unconfirmed_write_is_reported_and_sets_no_desired_limit(self):
+        self.service.poll_once()
+        self.fake.ignore_writes = True                 # the charger echoes the write but keeps the old value
+        with self.assertRaises(ChargerError) as cm:
+            self.service.set_limit(8)
+        self.assertIn("not confirmed", str(cm.exception))
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+
+    def test_an_unreachable_charger_during_a_write_is_an_error(self):
+        self.service.poll_once()
+        self.fake.stop()
+        with self.assertRaises(ChargerError):
+            self.service.set_limit(8)
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+
+
+class RestoreTest(ServiceTest):
+    def test_it_never_writes_on_its_own_at_start(self):
+        self.fake.regs[1000] = 0                       # e.g. the charger fell back to 0 A
+        for _ in range(3):
+            self.clock.t += 20
+            self.service.poll_once()
+        self.assertEqual(self.fake.writes, [])
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+
+    def test_a_value_it_merely_read_never_becomes_the_desired_limit(self):
+        self.service.poll_once()
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+        self.assertEqual(self.fake.writes, [])
+
+    def test_a_lost_limit_is_restored_at_most_once_per_interval(self):
+        self.service.poll_once()
+        self.service.set_limit(8)
+        self.fake.regs[1000] = 0                       # a charger reboot, or another Modbus master
+        self.clock.t += 1
+        self.service.poll_once()
+        self.assertEqual(self.fake.writes, [(1000, 8), (1000, 8)])
+        self.assertIsNotNone(self.service.status()["restored_at"])
+        self.fake.regs[1000] = 0
+        self.clock.t += 1
+        self.service.poll_once()                       # within 10 s: no new write
+        self.assertEqual(len(self.fake.writes), 2)
+        self.clock.t += config.RESTORE_MIN_INTERVAL_S
+        self.service.poll_once()
+        self.assertEqual(len(self.fake.writes), 3)
+
+    def test_nothing_is_restored_when_the_limit_already_matches(self):
+        self.service.poll_once()
+        self.service.set_limit(8)
+        for _ in range(3):
+            self.clock.t += 20
+            self.service.poll_once()
+        self.assertEqual(self.fake.writes, [(1000, 8)])
+
+    def test_the_fallback_cycle_ends_with_the_limit_back_in_force(self):
+        self.service.poll_once()
+        self.service.set_limit(10)
+        self.fake.fall_back()                          # 30 s of silence: the charger signals 0 A
+        self.clock.t += 31
+        self.service.poll_once()                       # the first request sees 0 and puts the limit back
+        self.assertEqual(self.fake.regs[1000], 10)
+        self.assertEqual(self.fake.regs[706], 10)
+        self.assertEqual(self.fake.writes[-1], (1000, 10))
+        self.assertIsNotNone(self.service.status()["restored_at"])
+
+    def test_a_refused_restore_write_does_not_raise_or_spin(self):
+        self.service.poll_once()
+        self.service.set_limit(8)
+        self.fake.refuse_writes = True
+        self.fake.regs[1000] = 0
+        for _ in range(3):
+            self.clock.t += 1
+            self.service.poll_once()                   # logs and carries on
+        self.assertEqual(len([w for w in self.fake.writes if w == (1000, 8)]), 2)   # the Apply and one attempt
+
+
+class ThreadTest(ServiceTest):
+    def test_the_poller_thread_polls_repeatedly_and_stops(self):
+        service = ChargerService("127.0.0.1", self.port, period_s=0.05)
+        self.addCleanup(service.stop)
+        service.start()
+        deadline = time.monotonic() + 3
+        while len([e for e in self.fake.log if e[1] == 1000]) < 4 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertGreaterEqual(len([e for e in self.fake.log if e[1] == 1000]), 4)
+        service.stop()
+        polls = len(self.fake.log)
+        time.sleep(0.2)
+        self.assertEqual(len(self.fake.log), polls)
+
+    def test_the_poller_thread_survives_an_unexpected_exception(self):
+        service = ChargerService("127.0.0.1", self.port, period_s=0.05)
+        self.addCleanup(service.stop)
+        real = service.poll_once
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("something unexpected")
+            real()
+
+        service.poll_once = flaky
+        service.start()
+        deadline = time.monotonic() + 3
+        while len(calls) < 5 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertGreaterEqual(len(calls), 5)         # it kept polling after the exception
+        self.assertEqual(service.status()["link"], "ok")
+
+
 if __name__ == "__main__":
     unittest.main()

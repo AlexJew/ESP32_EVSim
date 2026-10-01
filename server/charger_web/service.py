@@ -94,6 +94,8 @@ class ChargerService:
                 for name, value in values.items():
                     self._values[name] = value
                     self._at[name] = None if value is None else now
+            if error is None:
+                self._restore_if_needed(now)
 
     def _link(self, now):
         if self._last_ok is None:
@@ -150,6 +152,72 @@ class ChargerService:
                 "desired_limit_a": desired,
                 "restored_at": self._timestamp(restored_at),
             }
+
+    # -- keeping and setting the limit ------------------------------------------------------
+
+    def _restore_if_needed(self, now):
+        """Put the desired limit back if the charger lost it. Never runs before a confirmed Apply."""
+        with self._cache_lock:
+            desired, current = self._desired, self._values["set_limit_a"]
+        if desired is None or current is None or current == desired:
+            return
+        if self._restore_attempt_at is not None and now - self._restore_attempt_at < config.RESTORE_MIN_INTERVAL_S:
+            return
+        self._restore_attempt_at = now
+        log.warning("the charger reports a limit of %s A; restoring the desired %s A", current, desired)
+        try:
+            self._modbus.write_single(self._registers["set_limit_a"]["address"], desired)
+        except ModbusError as exc:
+            with self._cache_lock:
+                self._error = str(exc)
+            return
+        with self._cache_lock:
+            self._restored_at = now
+
+    @staticmethod
+    def _validate_limit(value, installation_limit):
+        if type(value) is not int:
+            raise LimitValidationError("Current limit must be a whole number of amps.")
+        if value != 0 and not config.MIN_LIMIT_A <= value <= config.MAX_LIMIT_A:
+            raise LimitValidationError("Current limit must be 0 A or a whole value from 6 A to 16 A.")
+        ceiling = min(config.MAX_LIMIT_A, installation_limit)
+        if value > ceiling:
+            raise LimitValidationError(f"Current limit cannot exceed the installation limit of {ceiling} A.")
+
+    def set_limit(self, value):
+        """Write register 1000, read it back, and only then remember it as the desired limit."""
+        with self._cache_lock:
+            installation = self._values["installation_limit_a"]
+        self._validate_limit(value, config.MAX_LIMIT_A if installation is None else installation)
+        with self._io_lock:
+            try:
+                self._modbus.write_single(self._registers["set_limit_a"]["address"], value)
+                confirmed = self._read_register("set_limit_a")
+            except ModbusError as exc:
+                self._modbus.close()
+                raise ChargerError(f"Modbus write was not confirmed ({exc}); check the setting before retrying.") from exc
+            if confirmed != value:
+                raise ChargerError(f"Write was not confirmed; charger reports {confirmed!r} A.")
+            now = self._clock()
+            with self._cache_lock:
+                self._values["set_limit_a"], self._at["set_limit_a"] = confirmed, now
+                self._desired = value
+        return {"success": True, "set_limit_a": confirmed, "updated_at": self._timestamp(now)}
+
+    # -- the poller thread -------------------------------------------------------------------
+
+    def start(self):
+        """Poll in the background: this is also the heartbeat that keeps the charger from falling back."""
+        self._thread = threading.Thread(target=self._run, name="charger-poller", daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                self.poll_once()
+            except Exception:             # one bad poll must never stop the heartbeat
+                log.exception("charger poll failed")
+            self._stop.wait(self._period)
 
     def stop(self):
         """Stop the poller (if it is running) and close the connection."""

@@ -1,0 +1,15 @@
+{
+  "_note": "AMTRON Charge Control (CC612), MENNEKES ECU Modbus TCP spec rev 1.07, confirmed on firmware 5.33 (2026-09-30). Every register is a holding register (function code 3). size 2 means two registers, high word first. Register 134 is read only; the writable limit is 1000.",
+  "unit": 255,
+  "registers": {
+    "set_limit_a": {"address": 1000},
+    "operator_limit_a": {"address": 134},
+    "installation_limit_a": {"address": 133},
+    "signalled_current_a": {"address": 706},
+    "vehicle_state": {"address": 122},
+    "charger_status": {"address": 104},
+    "meter_current_l1_a": {"address": 212, "size": 2, "scale": 0.001},
+    "meter_current_l2_a": {"address": 214, "size": 2, "scale": 0.001},
+    "meter_current_l3_a": {"address": 216, "size": 2, "scale": 0.001}
+  }
+}

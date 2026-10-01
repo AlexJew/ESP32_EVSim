@@ -1,7 +1,7 @@
 # AMTRON Charger Web Interface — Design
 
 **Date:** 2026-09-30  
-**Status:** approved conversational design; written spec pending user review  
+**Status:** superseded: the page now uses Modbus TCP instead of REST; see [2026-10-01-charger-modbus-backend-design.md](2026-10-01-charger-modbus-backend-design.md). The REST session and credential sections below no longer apply.
 **Scope:** a local web page for setting the AMTRON's operator current limit and reading the current values reported by the charger itself.
 
 ## Problem
@@ -33,15 +33,15 @@ The user is Alexandre, operating the EVSim bench from the development computer. 
 - As the bench operator, I want to see the charger's signalled current and metered current draw separately so a zero draw is not confused with a zero offer or an API failure.
 - As the bench operator, I want the app to report stale readings, failed writes, and session errors clearly so it does not present an old or unconfirmed value as current.
 
-## Approved design
+## Revised design
 
 ### Architecture
 
-Extend the existing Python `setpoint_server` process with a charger REST client and a small local web module. The web listener runs separately from the MQTT averaging loop so HTTP requests do not block setpoint publishing. The browser talks only to this local backend; the backend talks to the charger.
+Implement the charger page as an independent Python package and process under `server/charger_web/`. Keep the charger REST client, HTTP API, static browser assets, and startup code inside that package. The page process talks to the AMTRON; the browser talks only to the local backend. It does not import or start the MQTT averaging service.
 
-The service binds to `127.0.0.1` on the development computer (default port `8080`). It is started explicitly with a web option, for example `python -m setpoint_server --web`; this leaves the existing MQTT-only startup available. The UI uses same-origin requests to the local service and does not call the charger directly.
+The service binds to `127.0.0.1` on the development computer (default port `8080`) and runs as a separate process, started with `python -m charger_web` from the `server` directory. The existing `python -m setpoint_server` command remains unchanged. The user starts and stops the two processes independently; process supervision through an OS service manager is outside this v1 scope.
 
-Keep charger communication and session management in a dedicated client module. Keep HTTP routing and static page delivery in a web module. The existing MQTT client, input subscription, averaging window, and output topic remain unchanged.
+Keep charger communication and session management in a dedicated client module. Keep HTTP routing and static page delivery in the same `charger_web` package. The existing MQTT client, input subscription, averaging window, and output topic remain unchanged and run in a separate process.
 
 Serialize charger REST operations through one client lock. This prevents concurrent page requests from racing session renewal or interleaving a settings write with its readback. The page disables **Apply** while a write is in progress.
 
@@ -115,18 +115,18 @@ The status response distinguishes `ok`, `stale`, `unavailable`, and `not_configu
 - [ ] Authentication is automatic; the browser never receives credentials or an AMTRON REST session ID.
 - [ ] Credentials and tokens never appear in source control or application logs.
 - [ ] Charger/network failures appear as stale or unavailable readings, with the last successful update time.
-- [ ] Missing web credentials do not prevent the existing MQTT averaging server from running.
+- [ ] Starting, stopping, or failing the charger web process does not stop or alter the separately running MQTT averaging process.
 
 ### Acceptance walkthrough
 
-1. Start the existing server with its web option from the development computer and open the local URL.
+1. Start the MQTT setpoint server and the standalone charger web process in separate terminals. Open the local charger page URL.
 2. Confirm the page reports the current `OperatorCurrentLimit_vehicleif`, installation limit, `SignaledCurrentLimit_vehicleif`, and `OcppMeterCurrent_meter` values from the charger.
 3. Confirm live readings update about every two seconds and the settings values refresh after a write.
 4. Apply a valid nonzero current limit such as 8 A. Confirm the backend reads back 8 A and the UI reports success. When the charger is offering current, confirm the signalled value follows as expected; do not require meter current to equal the limit.
 5. Apply 0 A. Confirm the settings readback is 0 A. Separately record the charger's observed signaling and meter behavior; the UI must not assume 0 means pause or stop.
 6. Try 1 A, 5 A, a fraction, a negative value, and a value above the installation ceiling. Confirm each is rejected without a charger write.
 7. Disconnect the charger or invalidate the session. Confirm the page marks readings stale/unavailable, reports the error, and does not replace old values with zero or claim a write succeeded.
-8. Confirm the normal MQTT averaging loop continues while the web page is open and during a failed charger request.
+8. Stop the charger web process and confirm the separately running MQTT averaging process continues. Restart the page process, make the charger unreachable, and confirm MQTT averaging continues through the charger outage.
 
 ### Nice to have
 

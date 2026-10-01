@@ -13,3 +13,4 @@
 - [Hardware status](evsim-hardware-status.md) — PCB not yet delivered; protoboard works and reads CP PWM.
 - [EVSim setpoint server](evsim-setpoint-server.md) — server/ averages evsim/cp over 1 s, publishes evsim/setpoint for the Fronius.
 - [Amps to watts](evsim-amps-to-watts.md) — decided, not implemented: DC target = 1.2247 x offered amps x measured V_dc (about 630 W/A), not amps x 690 V.
+- [AMTRON Modbus](evsim-amtron-modbus.md) — register map, the 30 s fallback to 0 A and the limit restored on the next request; the charger page uses it.

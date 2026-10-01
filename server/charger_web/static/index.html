@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AMTRON charger</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">EVSim <span aria-hidden="true">/</span> local control</p>
+        <h1>AMTRON charger</h1>
+        <p class="subheading">Current limit and live charger readings over Modbus</p>
+      </div>
+      <span id="connection" class="connection" data-state="loading">Connecting…</span>
+    </header>
+
+    <p id="banner" class="banner" role="status" hidden></p>
+
+    <section class="panel limit-panel" aria-labelledby="limit-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Charger setting</p>
+          <h2 id="limit-title">Maximum current</h2>
+        </div>
+        <span id="installation-limit" class="ceiling">Installation limit: —</span>
+      </div>
+      <form id="limit-form">
+        <label for="current-limit">Set maximum current</label>
+        <div class="control-row">
+          <div class="input-wrap">
+            <input id="current-limit" name="current_limit_a" type="number" inputmode="numeric" step="1" min="0" max="16" value="0" required>
+            <span aria-hidden="true">A</span>
+          </div>
+          <button id="apply" type="submit">Apply</button>
+        </div>
+        <p class="hint">Choose 0 A (pause) or a whole value from 6 A to the installation limit. The charger keeps this value while this page is running.</p>
+        <p id="write-message" class="message" role="status" aria-live="polite"></p>
+      </form>
+      <div class="current-setting">
+        <span>Set on the charger</span>
+        <strong id="configured-limit">—</strong>
+      </div>
+      <div class="current-setting">
+        <span>Operator limit (set on the AMTRON page)</span>
+        <strong id="operator-limit">—</strong>
+      </div>
+      <p id="operator-warning" class="warning" hidden></p>
+      <p id="settings-updated" class="updated">Waiting for charger settings</p>
+    </section>
+
+    <section class="readings" aria-label="Charger current readings">
+      <article class="panel reading-card">
+        <p class="eyebrow">Vehicle signal</p>
+        <h2>Signalled current</h2>
+        <div id="signalled-current" class="reading-value">—</div>
+        <p class="description">Limit currently advertised to the simulated vehicle</p>
+        <p id="signalled-updated" class="updated">Waiting for charger data</p>
+      </article>
+      <article class="panel reading-card">
+        <p class="eyebrow">Energy meter</p>
+        <h2>Measured current draw</h2>
+        <div id="meter-current" class="meter-values"><span class="reading-value">—</span></div>
+        <p class="description">Current measured by the charger, per phase</p>
+        <p id="meter-updated" class="updated">Waiting for charger data</p>
+      </article>
+    </section>
+
+    <section class="panel state-panel" aria-label="Charger state">
+      <div><span class="eyebrow">Vehicle state</span><strong id="vehicle-state">—</strong></div>
+      <div><span class="eyebrow">Charger status</span><strong id="charger-status">—</strong></div>
+    </section>
+
+    <footer>
+      <span id="last-updated">Readings refresh every 2 seconds.</span>
+      <button id="refresh" class="text-button" type="button">Refresh now</button>
+    </footer>
+  </main>
+</body>
+</html>

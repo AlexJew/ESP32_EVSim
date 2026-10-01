@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .charger import ChargerClient, ChargerError, LimitValidationError
+from .service import ChargerError, ChargerService, LimitValidationError
 from .config import DEFAULT_WEB_HOST, DEFAULT_WEB_PORT
 
 log = logging.getLogger("charger_web.http")
@@ -24,7 +24,7 @@ class _LocalHTTPServer(ThreadingHTTPServer):
 def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
     if host != DEFAULT_WEB_HOST:
         raise ValueError("The charger page must bind to 127.0.0.1.")
-    client = charger or ChargerClient()
+    client = charger or ChargerService()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "EVSimChargerWeb/1"
@@ -92,9 +92,6 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
                 self._json(403, {"error": "Cross-origin writes are not allowed."})
                 return
             path = urlsplit(self.path).path
-            if path == "/api/charger/reconnect":
-                self._json(200, client.reconnect())
-                return
             if path != "/api/charger/operator-limit":
                 self._json(404, {"error": "Not found."})
                 return
@@ -117,7 +114,7 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
                 self._json(400, {"error": "Expected current_limit_a."})
                 return
             try:
-                result = client.set_operator_limit(payload["current_limit_a"])
+                result = client.set_limit(payload["current_limit_a"])
             except LimitValidationError as exc:
                 self._json(400, {"success": False, "error": str(exc)})
                 return

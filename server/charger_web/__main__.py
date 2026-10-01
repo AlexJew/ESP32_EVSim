@@ -39,8 +39,8 @@ def main(argv=None):
             service = ChargerService()
         except ValueError as exc:
             parser.error(str(exc))
+        server = create_server(charger=service, host=args.host, port=args.port)   # bind first: a taken port must not start a poll
         service.start()          # the background poller is also the charger's heartbeat
-        server = create_server(charger=service, host=args.host, port=args.port)
         log.info("charger page listening at http://127.0.0.1:%d/", args.port)
         server.serve_forever()
     except KeyboardInterrupt:

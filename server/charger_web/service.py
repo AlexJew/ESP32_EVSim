@@ -3,7 +3,7 @@
 One thread owns one Modbus connection and reads the charger every POLL_PERIOD_S. That is also the
 heartbeat the charger needs: after FALLBACK_AFTER_S without Modbus traffic it drops to its safe current
 (0 A on this unit), and the next request restores the limit last written. HTTP handlers read a cache and
-never talk to the charger on the read path; writes go through the same I/O lock.
+never talk to the charger on the read path; writes (from the HTTP threads) take the same I/O lock.
 """
 
 from __future__ import annotations
@@ -159,7 +159,7 @@ class ChargerService:
         """Put the desired limit back if the charger lost it. Never runs before a confirmed Apply."""
         with self._cache_lock:
             desired, current = self._desired, self._values["set_limit_a"]
-        if desired is None or current is None or current == desired:
+        if desired is None or current is None or current == desired or self._stop.is_set():
             return
         if self._restore_attempt_at is not None and now - self._restore_attempt_at < config.RESTORE_MIN_INTERVAL_S:
             return
@@ -184,23 +184,34 @@ class ChargerService:
         if value > ceiling:
             raise LimitValidationError(f"Current limit cannot exceed the installation limit of {ceiling} A.")
 
+    def _forget_desired(self):
+        with self._cache_lock:
+            self._desired = None
+
     def set_limit(self, value):
         """Write register 1000, read it back, and only then remember it as the desired limit."""
         with self._cache_lock:
             installation = self._values["installation_limit_a"]
         self._validate_limit(value, config.MAX_LIMIT_A if installation is None else installation)
         with self._io_lock:
+            sent = False
             try:
                 self._modbus.write_single(self._registers["set_limit_a"]["address"], value)
+                sent = True
                 confirmed = self._read_register("set_limit_a")
             except ModbusError as exc:
                 self._modbus.close()
+                if sent or isinstance(exc, ModbusTransportError):
+                    self._forget_desired()        # the charger may hold the new value: do not revert it behind the user's back
                 raise ChargerError(f"Modbus write was not confirmed ({exc}); check the setting before retrying.") from exc
             if confirmed != value:
+                self._forget_desired()
                 raise ChargerError(f"Write was not confirmed; charger reports {confirmed!r} A.")
             now = self._clock()
             with self._cache_lock:
                 self._values["set_limit_a"], self._at["set_limit_a"] = confirmed, now
+                # the signalled current (706) follows the limit with a delay: do not show a stale 0 as "paused"
+                self._values["signalled_current_a"], self._at["signalled_current_a"] = None, None
                 self._desired = value
         return {"success": True, "set_limit_a": confirmed, "updated_at": self._timestamp(now)}
 
@@ -224,4 +235,8 @@ class ChargerService:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2 * config.MODBUS_TIMEOUT_S + 2)
-        self._modbus.close()
+        if self._io_lock.acquire(timeout=2 * config.MODBUS_TIMEOUT_S + 2):
+            try:
+                self._modbus.close()
+            finally:
+                self._io_lock.release()

@@ -2,11 +2,15 @@ import contextlib
 import http.client
 import io
 import json
+import os
 import threading
+import time
 import unittest
+from unittest import mock
 
 from fake_amtron import FakeAmtron
 from charger_web import __main__ as charger_main
+from charger_web import config
 from charger_web.service import ChargerService
 from charger_web.web import create_server
 
@@ -91,6 +95,16 @@ class WebTest(unittest.TestCase):
             create_server(charger=self.service, host="0.0.0.0", port=0)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             charger_main.main(["--host", "0.0.0.0"])
+
+
+    def test_a_taken_port_stops_the_start_before_the_charger_is_ever_read(self):
+        with mock.patch.object(config, "MODBUS_PORT", self.service._modbus.port), \
+                mock.patch.dict(os.environ, {"EVSIM_CHARGER_HOST": "127.0.0.1"}), \
+                self.assertRaises(OSError):
+            before = len(self.fake.log)
+            charger_main.main(["--port", str(self.web_port)])
+        time.sleep(0.2)
+        self.assertEqual(len(self.fake.log), before)   # the poller never started, so the charger saw nothing
 
 
 if __name__ == "__main__":

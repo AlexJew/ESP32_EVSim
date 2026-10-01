@@ -9,6 +9,7 @@ from unittest import mock
 
 from fake_amtron import FakeAmtron
 from charger_web import config
+from charger_web.modbus import ModbusTransportError
 from charger_web.registers import load_map
 from charger_web.service import ChargerError, ChargerService, LimitValidationError
 
@@ -274,6 +275,85 @@ class RestoreTest(ServiceTest):
             self.clock.t += 1
             self.service.poll_once()                   # logs and carries on
         self.assertEqual(len([w for w in self.fake.writes if w == (1000, 8)]), 2)   # the Apply and one attempt
+
+
+    def test_an_unconfirmed_write_is_not_silently_reverted_by_the_restore(self):
+        self.service.poll_once()
+        self.service.set_limit(10)
+        self.fake.ignore_writes = False
+        original = self.service._read_register
+
+        def fail_readback(name):
+            if name == "set_limit_a" and fail_readback.armed:
+                raise ModbusTransportError("timeout")
+            return original(name)
+
+        fail_readback.armed = True
+        with mock.patch.object(self.service, "_read_register", fail_readback):
+            with self.assertRaises(ChargerError):
+                self.service.set_limit(12)               # sent, but the read-back never arrived
+        fail_readback.armed = False
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+        self.clock.t += 20
+        self.service.poll_once()
+        self.assertEqual(self.fake.writes, [(1000, 10), (1000, 12)])   # nothing is written back to 10
+        self.assertEqual(self.service.status()["set_limit_a"]["value"], 12)
+
+    def test_a_mismatched_read_back_is_not_silently_reverted_either(self):
+        self.service.poll_once()
+        self.service.set_limit(10)
+        self.fake.ignore_writes = True
+        with self.assertRaises(ChargerError):
+            self.service.set_limit(12)
+        self.fake.ignore_writes = False
+        self.assertIsNone(self.service.status()["desired_limit_a"])
+        self.clock.t += 20
+        self.service.poll_once()
+        self.assertEqual(self.fake.writes, [(1000, 10), (1000, 12)])
+
+    def test_a_refused_write_keeps_the_earlier_desired_limit(self):
+        self.service.poll_once()
+        self.service.set_limit(10)
+        self.fake.refuse_writes = True
+        with self.assertRaises(ChargerError):
+            self.service.set_limit(12)                   # refused: the charger certainly still holds 10
+        self.assertEqual(self.service.status()["desired_limit_a"], 10)
+
+    def test_nothing_is_restored_once_the_service_is_stopping(self):
+        self.service.poll_once()
+        self.service.set_limit(8)
+        self.fake.regs[1000] = 0
+        self.service._stop.set()
+        self.clock.t += 20
+        self.service.poll_once()
+        self.assertEqual(self.fake.writes, [(1000, 8)])
+
+    def test_the_paused_warning_waits_for_a_poll_after_an_apply(self):
+        self.fake.regs[1000] = 0
+        self.fake.regs[706] = 0
+        self.service.poll_once()
+        self.fake.ignore_signal_updates = True           # the real unit takes about 3 s to follow
+        self.service.set_limit(10)
+        self.assertFalse(self.service.status()["paused"])
+
+
+class RegisterMapSafetyTest(unittest.TestCase):
+    def _map(self, address):
+        m = load_map()
+        m["registers"]["set_limit_a"]["address"] = address
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(m, f)
+        self.addCleanup(os.unlink, f.name)
+        return f.name
+
+    def test_the_writable_register_must_be_1000(self):
+        with self.assertRaises(ValueError) as cm:
+            load_map(self._map(134))
+        self.assertIn("1000", str(cm.exception))
+
+    def test_a_missing_map_file_is_a_value_error(self):
+        with self.assertRaises(ValueError):
+            load_map("/nonexistent/registers.json")
 
 
 class ThreadTest(ServiceTest):

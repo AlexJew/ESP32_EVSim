@@ -49,6 +49,7 @@ class FakeAmtron:
         self.refuse_writes = False    # answer every write with Modbus exception 3
         self.refuse_reads = set()     # addresses answered with exception 2
         self.ignore_writes = False    # echo a write but keep the old value
+        self.ignore_signal_updates = False   # 706 does not follow a write at once (the real unit takes ~3 s)
         self.in_fallback = False
         self._stored = None
         self.clients = []
@@ -105,7 +106,7 @@ class FakeAmtron:
                     return bytes([fc | 0x80, 3])
                 if not self.ignore_writes:
                     self.regs[addr] = arg
-                    if addr == 1000:
+                    if addr == 1000 and not self.ignore_signal_updates:
                         self._signal()          # the signalled current follows the limit
                 return body[:5]
             return bytes([fc | 0x80, 2])        # input registers and everything else: refused

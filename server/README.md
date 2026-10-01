@@ -48,7 +48,9 @@ How it works, and what to know:
 - "Maximum current" writes register 1000 (0 A pauses; otherwise 6 to 16 A). The AMTRON's own operator limit
   (register 134, set on its page) is a ceiling: the effective limit is the lower of the two.
 - After you press Apply the page keeps that limit: if the charger loses it (a reboot, another Modbus master), the
-  service puts it back, at most once every 10 s.
+  service puts it back, at most once every 10 s. This also overrides another Modbus master that pauses the charger
+  (for example by writing 0 A) while this page is running; the page only forgets its limit when you Apply a new one,
+  when an Apply is not confirmed (it then adopts whatever the charger holds), or when it restarts.
 - The service never writes on its own at start. But the charger remembers the last limit written and restores it on
   the first Modbus request after a fallback, so starting this page can resume charging at that limit.
 - Modbus has no login: anything on the lab network can set the charger's current. Keep the page on loopback.

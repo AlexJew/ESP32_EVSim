@@ -51,11 +51,18 @@ class ModbusTcp:
             self._tid = (self._tid + 1) & 0xFFFF
             frame = struct.pack(">HHHBB", self._tid, 0, 2 + len(payload), self.unit, fc) + payload
             self._sock.sendall(frame)
-            _, _, length, _ = struct.unpack(">HHHB", self._recv(7))
+            tid, _, length, _ = struct.unpack(">HHHB", self._recv(7))
+            if tid != self._tid:
+                raise ModbusTransportError(f"reply for transaction {tid}, expected {self._tid}")
+            if length < 2:
+                raise ModbusTransportError(f"malformed reply (length field {length})")
             body = self._recv(length - 1)
         except (OSError, struct.error) as exc:
             self.close()
             raise ModbusTransportError(f"Could not reach the charger over Modbus: {exc}") from exc
+        except ModbusTransportError:
+            self.close()
+            raise
         if body[0] == fc | 0x80:
             raise ModbusError(f"Modbus exception {body[1]} (function {fc})")
         if body[0] != fc:
@@ -69,7 +76,7 @@ class ModbusTcp:
         while count > 0:
             n = min(count, MAX_READ)
             data = self._request(fc, struct.pack(">HH", address, n))
-            if data[0] != 2 * n:
+            if len(data) != 1 + 2 * n or data[0] != 2 * n:
                 raise ModbusError(f"short read at {address}")
             out += struct.unpack(f">{n}H", data[1:])
             address += n
@@ -78,5 +85,5 @@ class ModbusTcp:
 
     def write_single(self, address, value):
         data = self._request(6, struct.pack(">HH", address, value))
-        if struct.unpack(">HH", data) != (address, value):
+        if len(data) != 4 or struct.unpack(">HH", data) != (address, value):
             raise ModbusError(f"unexpected echo writing register {address}")

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** Implement inline from this plan and the design spec after the user approves this plan.
 
+> **Superseded (2026-10-01):** the page now uses Modbus TCP, not REST; see [2026-10-01-charger-modbus-backend.md](2026-10-01-charger-modbus-backend.md).
+
 **Goal:** Add a loopback-only page to set the AMTRON operator current limit and view charger-reported current readings.
 
 **Architecture:** Add an independent `charger_web` Python package and process under `server/charger_web/`, with a serialized REST client, standard-library HTTP server, and static browser assets. Start it with `python -m charger_web`; keep `setpoint_server` unchanged and run the two processes independently.

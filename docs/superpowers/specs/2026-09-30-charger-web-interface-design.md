@@ -1,7 +1,7 @@
 # AMTRON Charger Web Interface — Design
 
 **Date:** 2026-09-30  
-**Status:** revised architecture pending user review
+**Status:** superseded: the page now uses Modbus TCP instead of REST; see [2026-10-01-charger-modbus-backend-design.md](2026-10-01-charger-modbus-backend-design.md). The REST session and credential sections below no longer apply.
 **Scope:** a local web page for setting the AMTRON's operator current limit and reading the current values reported by the charger itself.
 
 ## Problem

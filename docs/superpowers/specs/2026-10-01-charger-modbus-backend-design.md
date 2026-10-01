@@ -1,7 +1,7 @@
 # AMTRON Charger Page over Modbus TCP — Design
 
 **Date:** 2026-10-01
-**Status:** awaiting review
+**Status:** approved, implemented on this branch
 **Scope:** make the existing local charger page (`server/charger_web/`) read and set the AMTRON's current over **Modbus TCP instead of the REST API**, and keep the charger's current alive from a background poller. Amends
 [2026-09-30-charger-web-interface-design.md](2026-09-30-charger-web-interface-design.md); wherever the two disagree, this document wins.
 

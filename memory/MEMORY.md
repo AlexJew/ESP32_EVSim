@@ -12,3 +12,4 @@
 - [charger_poll.py](evsim-charger-poll-tool.md) — logs signaled current + expected duty to CSV; --sweep steps the limit.
 - [Hardware status](evsim-hardware-status.md) — PCB not yet delivered; protoboard works and reads CP PWM.
 - [EVSim setpoint server](evsim-setpoint-server.md) — server/ averages evsim/cp over 1 s, publishes evsim/setpoint for the Fronius.
+- [AMTRON Modbus](evsim-amtron-modbus.md) — register map, the 30 s fallback to 0 A and the limit restored on the next request; the charger page uses it.

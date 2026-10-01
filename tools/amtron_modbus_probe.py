@@ -3,12 +3,16 @@
 
 Only function codes 3 and 4 (reads) are sent. Nothing is ever written.
 
+WARNING: any request can resume charging. After a Modbus fallback (30 s without traffic) the charger
+restores the limit last written on the first request, even a read. All the AMTRON's registers are holding
+registers; function code 4 is refused.
+
 Change the operator limit on the charger's web page between two runs and diff the
 outputs to find which holding register is the operator limit.
 
 Examples:
     ./amtron_modbus_probe.py --unit 255 --start 0 --end 1200
-    ./amtron_modbus_probe.py --unit 1 --table input --start 100 --end 800 > input_a.txt
+    ./amtron_modbus_probe.py --unit 255 --table holding --start 100 --end 1100 > holding_a.txt
 """
 
 import argparse
@@ -25,7 +29,7 @@ def main():
     ap.add_argument("--host", default="192.168.21.117")
     ap.add_argument("--port", type=int, default=502)
     ap.add_argument("--unit", default="255", help="unit ID, or a comma-separated list to try (e.g. 0,1,255)")
-    ap.add_argument("--table", choices=("holding", "input", "both"), default="both")
+    ap.add_argument("--table", choices=("holding", "input", "both"), default="holding")
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--end", type=int, default=1200)
     ap.add_argument("--block", type=int, default=10, help="registers per request; a refused block is retried one by one")

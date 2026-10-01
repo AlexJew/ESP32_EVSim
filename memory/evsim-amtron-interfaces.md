@@ -16,7 +16,7 @@ Phoenix-Contact-style charge controller web interface.
 **Local / energy management**
 - `Operator Current Limit [A]` = 0  <- the likely target field for the max-current control.
 - `Energy management from external input` = Disable
-- `Modbus TCP Server for energy management systems` = **Off** (available, could be enabled)
+- `Modbus TCP Server for energy management systems` = **On since 2026-10-01** (port 502, address set MENNEKES); see [[evsim-amtron-modbus]]
 - `SEMP interface (SMA Sunny Home Manager)` = **On**, Charging Mode = *Surplus charging*,
   fallback current 16 A, 600 s to connection failure
 - `EEBus interface` = Off; `Dynamic Load Management` = Disabled; ASKI over OCPP-S = Off

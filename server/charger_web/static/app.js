@@ -18,12 +18,10 @@ function updateConnection(status, error) {
   const labels = {
     ok: "Charger connected",
     stale: "Showing stale readings",
+    fallback_expected: "Charger silent",
     unavailable: "Charger unavailable",
-    not_configured: "Credentials not configured",
-    session_taken: "Charger in use elsewhere",
   };
   badge.textContent = labels[status] || "Charger status unknown";
-  el("reconnect").hidden = status !== "session_taken";
   el("last-updated").textContent = error || "Readings refresh every 2 seconds.";
 }
 
@@ -73,32 +71,55 @@ function updateTimestamp(target, reading) {
   target.textContent = `${reading.status === "stale" ? "Stale · last updated" : "Updated"} ${time}`;
 }
 
+function updateBanner(status) {
+  const banner = el("banner");
+  const setLimit = status.set_limit_a ? status.set_limit_a.value : null;
+  let text = "";
+  let kind = "warning";
+  if (status.link === "fallback_expected") {
+    text = "No reply from the charger for 30 s or more. It drops to 0 A when its Modbus master goes silent, and puts the limit back on the next request.";
+  } else if (status.paused) {
+    text = `Charging is paused: the charger signals 0 A although the limit is ${setLimit} A.`;
+  } else if (status.restored_at) {
+    const age = (Date.now() - new Date(status.restored_at).getTime()) / 1000;
+    if (age >= 0 && age < 60) {
+      text = "The charger lost its limit and this page put it back.";
+      kind = "info";
+    }
+  }
+  banner.hidden = text === "";
+  banner.textContent = text;
+  banner.dataset.kind = kind;
+}
+
 function applyStatus(status) {
-  const signaled = status.signaled_current_a || { value: null, status: "unavailable" };
-  const meter = status.meter_current_a || { value: null, status: "unavailable" };
-  renderReading(el("signalled-current"), signaled);
+  const empty = { value: null, status: "unavailable" };
+  const signalled = status.signalled_current_a || empty;
+  const meter = status.meter_current_a || empty;
+  renderReading(el("signalled-current"), signalled);
   renderReading(el("meter-current"), meter, true);
-  updateTimestamp(el("signalled-updated"), signaled);
+  updateTimestamp(el("signalled-updated"), signalled);
   updateTimestamp(el("meter-updated"), meter);
 
-  const operator = status.operator_limit_a || { value: null, status: "unavailable" };
-  const installation = status.installation_limit_a || { value: null, status: "unavailable" };
+  const setLimit = status.set_limit_a || empty;
+  const operator = status.operator_limit_a || empty;
+  const installation = status.installation_limit_a || empty;
   installationLimit = installation.value;
-  el("configured-limit").textContent = formatAmps(operator.value);
+  el("configured-limit").textContent = formatAmps(setLimit.value);
+  el("operator-limit").textContent = formatAmps(operator.value);
   el("installation-limit").textContent = `Installation limit: ${formatAmps(installation.value)}`;
-  const settingsStatus = [operator.status, installation.status].includes("stale")
-    ? "stale"
-    : operator.status === "unavailable" && installation.status === "unavailable"
-      ? "unavailable"
-      : "ok";
-  updateTimestamp(el("settings-updated"), {
-    status: settingsStatus,
-    updated_at: operator.updated_at || installation.updated_at,
-  });
+  const warning = el("operator-warning");
+  warning.hidden = !status.operator_below_set;
+  warning.textContent = status.operator_below_set
+    ? `The AMTRON page's own limit of ${operator.value} A caps the signalled current below the ${setLimit.value} A set here.`
+    : "";
+  el("vehicle-state").textContent = (status.vehicle_state && status.vehicle_state.value) || "Unavailable";
+  el("charger-status").textContent = (status.charger_status && status.charger_status.value) || "Unavailable";
+  updateTimestamp(el("settings-updated"), setLimit);
+  updateBanner(status);
   input.max = installation.value === null ? 16 : Math.min(16, installation.value);
-  if (operator.value !== null && document.activeElement !== input) input.value = operator.value;
-  input.disabled = status.status === "not_configured";
-  applyButton.disabled = writePending || status.status === "not_configured";
+  if (setLimit.value !== null && document.activeElement !== input) input.value = setLimit.value;
+  applyButton.disabled = writePending;
 }
 
 async function refresh() {
@@ -151,7 +172,7 @@ form.addEventListener("submit", async (event) => {
     const result = await response.json();
     if (!response.ok || !result.success) throw new Error(result.error || "The charger did not confirm the setting.");
     message.dataset.kind = "success";
-    message.textContent = `Confirmed by charger: ${formatAmps(result.operator_limit_a)}.`;
+    message.textContent = `Confirmed by charger: ${formatAmps(result.set_limit_a)}.`;
     pollAgain = true;
     await refresh();
   } catch (error) {
@@ -162,17 +183,10 @@ form.addEventListener("submit", async (event) => {
   } finally {
     writePending = false;
     applyButton.textContent = "Apply";
-    applyButton.disabled = el("connection").dataset.state === "not_configured";
+    applyButton.disabled = false;
   }
 });
 
-el("reconnect").addEventListener("click", async () => {
-  try {
-    await fetch("/api/charger/reconnect", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-  } finally {
-    void refresh();
-  }
-});
 el("refresh").addEventListener("click", () => void refresh());
 void refresh();
 window.setInterval(() => void refresh(), 2000);

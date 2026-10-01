@@ -73,3 +73,13 @@ footer { color: var(--muted); font-size: .79rem; margin-top: 19px; }
   .reading-card { min-height: 0; }
   footer { align-items: flex-start; }
 }
+
+.banner { background: #fff1dd; border-radius: 12px; color: var(--warning); font-size: .9rem; line-height: 1.5; margin: 0 0 18px; padding: 13px 16px; }
+.banner[data-kind="info"] { background: var(--green-pale); color: var(--green-dark); }
+.banner[hidden], .warning[hidden] { display: none; }
+.warning { color: var(--warning); font-size: .84rem; margin: 12px 0 0; }
+.state-panel { display: flex; gap: 48px; margin-top: 18px; padding: 20px 25px; }
+.state-panel div { display: flex; flex-direction: column; gap: 6px; }
+.state-panel .eyebrow { margin: 0; }
+.state-panel strong { font-size: 1.05rem; }
+.connection[data-state="fallback_expected"] { background: #fff1dd; color: var(--warning); }

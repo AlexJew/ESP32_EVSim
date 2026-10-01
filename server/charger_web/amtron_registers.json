@@ -1,29 +1,15 @@
 {
-  "_note": "Fill in from the MENNEKES AMTRON Modbus register documentation, or find them with tools/amtron_modbus_probe.py. A null address leaves that value unavailable. Writes stay refused until operator_limit has an address.",
+  "_note": "AMTRON Charge Control (CC612), MENNEKES ECU Modbus TCP spec rev 1.07, confirmed on firmware 5.33 (2026-09-30). Every register is a holding register (function code 3). size 2 means two registers, high word first. Register 134 is read only; the writable limit is 1000.",
   "unit": 255,
-  "operator_limit": {
-    "table": "holding",
-    "address": 134,
-    "scale": 1
-  },
-  "installation_limit": {
-    "table": "input",
-    "address": null,
-    "scale": 1
-  },
-  "signalled_current": {
-    "table": "input",
-    "address": null,
-    "scale": 1
-  },
-  "meter_current": {
-    "table": "input",
-    "addresses": {
-      "L1": null,
-      "L2": null,
-      "L3": null
-    },
-    "scale": 1
-  },
-  "_confirmed": "operator_limit = holding 134 (changed 12->14 with the AMTRON page, 2026-09-30). Unverified candidate: holding 133 = 16 may be the installation limit."
+  "registers": {
+    "set_limit_a": {"address": 1000},
+    "operator_limit_a": {"address": 134},
+    "installation_limit_a": {"address": 133},
+    "signalled_current_a": {"address": 706},
+    "vehicle_state": {"address": 122},
+    "charger_status": {"address": 104},
+    "meter_current_l1_a": {"address": 212, "size": 2, "scale": 0.001},
+    "meter_current_l2_a": {"address": 214, "size": 2, "scale": 0.001},
+    "meter_current_l3_a": {"address": 216, "size": 2, "scale": 0.001}
+  }
 }

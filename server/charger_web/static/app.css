@@ -83,3 +83,30 @@ footer { color: var(--muted); font-size: .79rem; margin-top: 19px; }
 .state-panel .eyebrow { margin: 0; }
 .state-panel strong { font-size: 1.05rem; }
 .connection[data-state="fallback_expected"] { background: #fff1dd; color: var(--warning); }
+
+/* The power chain and the chart. The swatch colours repeat the ones in chart.js. */
+h3 { font-size: .98rem; letter-spacing: -.01em; margin: 0 0 14px; }
+.chain { margin-top: 28px; }
+.chain-heading { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: 14px; }
+.chain-cards { display: grid; gap: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.chain-card { padding: 22px; }
+.chain-value { font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-variant-numeric: tabular-nums; font-weight: 740; letter-spacing: -.05em; margin-bottom: 11px; }
+.chain-card .description { margin-bottom: 10px; }
+[data-status="stale"], [data-status="unavailable"] { opacity: .45; }
+.connection[data-state="ok"] { background: var(--green-pale); color: var(--green-dark); }
+.chart-panel { margin-top: 28px; padding: 24px; }
+.chart-panel .section-heading { margin-bottom: 14px; }
+#chart { display: block; height: 300px; width: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.legend-item { align-items: center; background: #f0f5f2; color: var(--ink); display: inline-flex; font-size: .82rem; font-weight: 650; gap: 8px; padding: 7px 12px; }
+.legend-item:hover { background: #e4ede8; }
+.legend-item[aria-pressed="false"] { opacity: .4; text-decoration: line-through; }
+.swatch { border-radius: 50%; display: inline-block; height: 12px; width: 12px; }
+.legend-item[data-series="cp_w"] .swatch { background: #8aa699; }
+.legend-item[data-series="setpoint_w"] .swatch { background: #176b4a; }
+.legend-item[data-series="target_dc_w"] .swatch { background: #c27b14; }
+.legend-item[data-series="dc_w"] .swatch { background: #2a5fa8; }
+
+@media (max-width: 620px) {
+  .chain-cards { grid-template-columns: 1fr; }
+}

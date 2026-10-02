@@ -81,6 +81,8 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT, da
             asset = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/chart.js": ("chart.js", "text/javascript; charset=utf-8"),
+                "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
             }.get(path)
             if asset is None:

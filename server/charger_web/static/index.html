@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AMTRON charger</title>
+  <title>EVSim</title>
   <link rel="stylesheet" href="/app.css">
+  <script src="/chart.js" defer></script>
+  <script src="/dashboard.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -12,8 +14,8 @@
     <header class="page-header">
       <div>
         <p class="eyebrow">EVSim <span aria-hidden="true">/</span> local control</p>
-        <h1>AMTRON charger</h1>
-        <p class="subheading">Current limit and live charger readings over Modbus</p>
+        <h1>EVSim</h1>
+        <p class="subheading">Charger, setpoint and inverter, live</p>
       </div>
       <span id="connection" class="connection" data-state="loading">Connecting…</span>
     </header>
@@ -23,7 +25,7 @@
     <section class="panel limit-panel" aria-labelledby="limit-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Charger setting</p>
+          <p class="eyebrow">AMTRON charger · setting</p>
           <h2 id="limit-title">Maximum current</h2>
         </div>
         <span id="installation-limit" class="ceiling">Installation limit: —</span>
@@ -72,6 +74,54 @@
     <section class="panel state-panel" aria-label="Charger state">
       <div><span class="eyebrow">Vehicle state</span><strong id="vehicle-state">—</strong></div>
       <div><span class="eyebrow">Charger status</span><strong id="charger-status">—</strong></div>
+    </section>
+
+    <section class="chain" aria-label="Power chain">
+      <div class="chain-heading">
+        <h2>Power chain</h2>
+        <span id="mqtt-state" class="connection" data-state="loading">Broker …</span>
+      </div>
+      <div class="chain-cards">
+        <article class="panel chain-card">
+          <p class="eyebrow">Board</p>
+          <h3>Setpoint, raw</h3>
+          <div id="board-setpoint" class="chain-value">—</div>
+          <p id="board-detail" class="description">Waiting for the board</p>
+          <p id="board-updated" class="updated">Waiting for data</p>
+        </article>
+        <article class="panel chain-card">
+          <p id="setpoint-label" class="eyebrow">Setpoint</p>
+          <h3>Setpoint, 1 s average</h3>
+          <div id="setpoint-value" class="chain-value">—</div>
+          <p class="description">DC target <strong id="target-value">—</strong></p>
+          <p id="server-detail" class="description">Waiting for the server</p>
+          <p id="setpoint-updated" class="updated">Waiting for data</p>
+        </article>
+        <article class="panel chain-card">
+          <p class="eyebrow">Inverter</p>
+          <h3>DC power, MPPT 1</h3>
+          <div id="inverter-dc" class="chain-value">—</div>
+          <p class="description">Taken from the charger side, as read by the setpoint server</p>
+          <p id="inverter-updated" class="updated">Waiting for data</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel chart-panel" aria-labelledby="chart-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Last 10 minutes</p>
+          <h2 id="chart-title">Power</h2>
+        </div>
+        <span id="chart-note" class="ceiling">Waiting for history</span>
+      </div>
+      <canvas id="chart" role="img" aria-label="Line chart of the board setpoint, the setpoint average, the DC target and the inverter DC power over the last ten minutes"></canvas>
+      <div class="legend">
+        <button type="button" class="legend-item" data-series="cp_w" aria-pressed="true"><i class="swatch"></i><span>Board, raw</span></button>
+        <button type="button" class="legend-item" data-series="setpoint_w" aria-pressed="true"><i class="swatch"></i><span id="legend-setpoint">Setpoint, average</span></button>
+        <button type="button" class="legend-item" data-series="target_dc_w" aria-pressed="true"><i class="swatch"></i><span>DC target</span></button>
+        <button type="button" class="legend-item" data-series="dc_w" aria-pressed="true"><i class="swatch"></i><span>Inverter DC power</span></button>
+      </div>
     </section>
 
     <footer>

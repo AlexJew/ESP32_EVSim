@@ -1,10 +1,12 @@
 # EVSim Dashboard: Inverter DC Power, Setpoints and a Live Chart — Design
 
-**Date:** 2026-10-01
+**Date:** 2026-10-01 (amended 2026-10-02)
 **Status:** draft, awaiting review
-**Scope:** extend the local web page (`server/charger_web/`) so that, besides the AMTRON charger, it shows the **Fronius inverter's DC power** (Modbus TCP), the **board's telemetry** (`evsim/cp`), the **setpoint** the setpoint server publishes, and the **server's DC target** (`evsim/inverter`), with a **10-minute chart** of the four power values. Everything added here is read-only. Builds on
+**Scope:** extend the local web page (`server/charger_web/`) so that, besides the AMTRON charger, it shows the **Fronius inverter's DC power**, the **board's telemetry** (`evsim/cp`), the **setpoint** the setpoint server publishes, and the **server's DC target**, with a **10-minute chart** of the four power values. The inverter's DC power and the server's DC target both come from the setpoint server's `evsim/inverter` message; the page itself never talks to the inverter. Everything added here is read-only. Builds on
 [2026-10-01-charger-modbus-backend-design.md](2026-10-01-charger-modbus-backend-design.md) (the charger service, the HTTP layer) and
 [2026-09-30-inverter-writer-design.md](2026-09-30-inverter-writer-design.md) (the `evsim/inverter` message).
+
+**Amendment, 2026-10-02:** the first version of this design read the inverter directly, over a second Modbus connection (a new `InverterReader`). The `dc_w` field of `evsim/inverter` already carries the same value, MPPT 1's DC power as read once a second by the setpoint server's inverter writer, so the direct reader was dropped. That removes a Modbus client from the GEN24 and a whole unit from the page, and puts the DC power and the DC target in the same message, taken at the same moment. The cost is that the DC power exists only while the setpoint server runs with `--inverter`. The first version is in git history (commit 2d4d134).
 
 ## Why
 
@@ -14,11 +16,12 @@ A proper electric-car emulation is planned. It will replace the `evsim/setpoint`
 
 ## Decisions
 
-- The work lives **inside `charger_web`**, in the same process: it already serves the page and has a hardened Modbus client. One new dependency, `paho-mqtt` (already in `server/requirements.txt`).
-- **Read-only.** The inverter is only ever read (function code 3) and nothing is ever published. No new write path exists.
-- **Only the DC power** is taken from the inverter: MPPT 1's `DCW`, from SunSpec model 160, once a second. No AC power, grid values or inverter state (model 103); the state still arrives with the server's `evsim/inverter` message when the server runs with `--inverter`. The same read holds the DC voltage and current; they are left out until wanted.
+- The work lives **inside `charger_web`**, in the same process: it already serves the page and has the loopback HTTP layer. One new dependency, `paho-mqtt` (already in `server/requirements.txt`).
+- **Read-only.** Nothing is ever published, and the page opens no connection to the inverter. The page's only Modbus peer stays the AMTRON charger, with the existing service.
+- **Only the DC power** is taken from the inverter: `dc_w` in `evsim/inverter` is MPPT 1's DC power in watts, read by the setpoint server's writer once a second. The message's AC power is not used. Its `mode` and `inverter_state` are shown with the server's values.
+- **Why not a direct Modbus reader:** it would be a second reader of data already on the broker, and a third Modbus client on the GEN24 (the writer, this page, any tool), which was never tested. Reading the message instead keeps the DC power and the DC target aligned for judging how well the inverter follows its target. What it gives up: an inverter view that does not depend on the setpoint server (for example while driving the inverter by hand with `tools/fronius_modbus.py`).
 - The history is **in memory**, 10 minutes at 1 Hz. A restart empties it.
-- Each source fails **independently**: a dead broker or an unreachable inverter affects only its own cards and chart lines. The charger control and its 30 s Modbus heartbeat are untouched.
+- Each source fails **independently**: a dead broker affects the MQTT cards and chart lines but not the charger control or its 30 s Modbus heartbeat, and the other way round.
 
 ## Design
 
@@ -26,21 +29,13 @@ A proper electric-car emulation is planned. It will replace the `evsim/setpoint`
 
 | Unit | Job | Depends on |
 |---|---|---|
-| `inverter.py` — `InverterReader` | One thread and one persistent connection to the inverter. Once a second it reads model 160 in one request and caches MPPT 1's DC power. Exposes reads only. | `modbus.py` |
 | `telemetry.py` — `Telemetry` | A paho subscriber. Keeps the latest parsed value of each topic with its receive time, and the broker link state. | paho-mqtt |
-| `history.py` — `History` | A 1 Hz sampler that appends one frame to a ring buffer of 600 frames. | the two units above |
-| `web.py` | Two new GET endpoints. Everything existing is unchanged. | |
+| `history.py` — `History` | A 1 Hz sampler that appends one frame to a ring buffer of 600 frames. | `Telemetry` |
+| `dashboard.py` — `Dashboard` | Owns the lifecycle of the two units above (the broker connection and the sampler thread) and gives `web.py` two methods: the latest readings and the history. | the two units above |
+| `web.py` | Two new GET endpoints. Everything existing is unchanged. | `dashboard.py` |
 | `static/` | Power-chain cards and a canvas chart. | |
 
-`__main__` builds the server first, then starts the charger service, the inverter reader, the subscriber and the sampler, so a taken port starts nothing. A `finally` stops them all.
-
-### Inverter reader
-
-- The SunSpec chain is walked **once per connection**, only to find model 160's first address and length (marker `SunS` at 40000; every model's header gives its id and length). It is re-walked after a reconnect.
-- Each poll reads the whole of model 160 in one request, so the scale factors and the values come from the same instant. (On 2026-09-30 the DC power read 10× too large during start-up because a scale factor changed between two reads.)
-- MPPT 1 is the module whose **id is 1**, not the first in the list. `dc_w = DCW × 10^DCW_SF`. A raw value of 65535 ("not implemented") gives `None`.
-- Any transport error closes the connection and is retried with a back-off of 1 s up to 5 s. The last good value simply ages and turns stale. A malformed frame is a transport error (the client already enforces this).
-- The default host is `192.168.21.120`, set by `EVSIM_INVERTER_HOST` (validated like `EVSIM_CHARGER_HOST`). Unit ID 1, port 502.
+`__main__` builds the server first, then starts the charger service and the dashboard (the subscriber and the sampler), so a taken port starts nothing. A `finally` stops them all.
 
 ### Subscriber
 
@@ -51,12 +46,12 @@ A proper electric-car emulation is planned. It will replace the `evsim/setpoint`
 - **Parsers** (pure functions, never raise, drop what they cannot read):
   - `evsim/cp`: `setpoint_w` as a finite number from 0 to 12 000, plus `state` and `status`. The bounds are the setpoint server's: a corrupt value is dropped, never clamped.
   - setpoint topic: `setpoint_w` (same bounds) and `status`. This is the one function that changes when the car emulation's message differs.
-  - `evsim/inverter`: `target_dc_w` (a number, or null), `mode`, `inverter_state`.
-- **Retained messages** (the setpoint topic is retained, so one arrives on every subscribe) are kept as the last known state, for example `server_offline`, but are flagged stale and never enter the history. `evsim/cp` and `evsim/inverter` are not retained by their publishers; a retained copy is treated the same way.
+  - `evsim/inverter`: `target_dc_w` (a number from 0 to 12 000, or null; anything else drops the message, as for the setpoint), `dc_w` (a finite number from 0 to 30 000 W, else `None`, and the message is kept: a measurement can exceed the 12 kW setpoint cap, and one bad number must not cost the target), `mode` and `inverter_state`.
+- **Retained messages** (the setpoint topic is retained, so one arrives on every subscribe) are kept as the last known state, for example `server_offline`, but are flagged stale and never enter the history. A retained message never replaces a fresh live one. `evsim/cp` and `evsim/inverter` are not retained by their publishers; a retained copy is treated the same way.
 
 ### Readings and staleness
 
-Every value is `{"value", "status", "updated_at"}`, as the charger readings already are. `status` is `ok` when the value is younger than the limit, `stale` when older (or retained), and `unavailable` when there has been none. The limits are 3 s for the MQTT values and the existing `STALE_AFTER_S` (5 s) for the inverter. The inverter reading is also `stale` while its link is down.
+Every value is `{"value", "status", "updated_at"}`, as the charger readings already are. `status` is `ok` when the value is younger than 3 s, `stale` when older (or retained), and `unavailable` when there has been none or the message carried `null`. The slowest topic publishes once a second, so 3 s is two missed messages.
 
 ### History
 
@@ -71,14 +66,14 @@ Both are GET, loopback only, behind the same Host check and headers as the exist
 
 - `GET /api/telemetry` returns the latest readings:
   `{"mqtt": {"connected": bool}, "board": {"setpoint_w": reading, "state": "C", "status": "live"}, "setpoint": {"topic": "evsim/setpoint", "setpoint_w": reading, "status": "ok"}, "server": {"target_dc_w": reading, "mode": "capped", "inverter_state": 4}, "inverter": {"dc_w": reading}}`.
-  Text fields are `null` when unknown.
+  `server.target_dc_w` and `inverter.dc_w` come from the same `evsim/inverter` message. Text fields are `null` when unknown.
 - `GET /api/history` returns `{"interval_s": 1, "window_s": 600, "frames": [...]}`. Frames the sampler missed are absent, not filled.
 - `GET /api/charger/status` and the limit write are unchanged.
 
 ### Page
 
 - The heading changes from "AMTRON charger" to "EVSim"; the charger limit control and readings stay as the first section.
-- Below it, a power-chain row of three cards: **board setpoint** (raw value, with the `live`, `held` or `zero` status and the pilot state), **server** (the setpoint topic's average and status, the DC target and `mode`) and **inverter DC power**. Each card shows its own stale or unavailable state.
+- Below it, a power-chain row of three cards: **board setpoint** (raw value, with the `live`, `held` or `zero` status and the pilot state), **server** (the setpoint topic's average and status, the DC target and `mode`) and **inverter DC power** (as read by the setpoint server). Each card shows its own stale or unavailable state.
 - Below that, the chart: four lines (raw setpoint, setpoint average, DC target, inverter DC power), the last 10 minutes, a y-axis in watts from 0 to the largest value, a time axis, and a legend whose entries toggle the lines. It is a plain `<canvas>` with no library, scaled for the display's pixel ratio. A line is broken wherever a frame is missing or `None`, so an outage shows as a gap.
 - The page fetches `/api/telemetry` every second and `/api/history` every two seconds, never with two requests of one kind in flight. All text is set with `textContent`; the legend toggles live in memory only.
 
@@ -86,28 +81,28 @@ Both are GET, loopback only, behind the same Host check and headers as the exist
 
 | Situation | Behaviour |
 |---|---|
-| Broker down | The cards from MQTT go stale, then unavailable; the chart shows gaps for those lines; the inverter and charger parts are unaffected. The subscriber reconnects by itself. |
-| Inverter unreachable | The DC card goes stale, then unavailable; the DC line has a gap. The reader retries with back-off. |
-| Setpoint server stopped | The retained `server_offline` shows as the last known state, flagged stale. |
-| Malformed message or register | Dropped (MQTT) or a transport error (Modbus); never an exception in a handler or a thread. |
+| Broker down | The MQTT cards go stale, then unavailable; the chart shows gaps for those lines; the charger part is unaffected. The subscriber reconnects by itself. |
+| Setpoint server stopped, or run without `--inverter` | No `evsim/inverter` messages: the DC target and DC power cards go stale, then unavailable, and their lines have a gap. For the setpoint topic, the retained `server_offline` shows as the last known state, flagged stale. |
+| Inverter unreachable by the server | The server publishes `mode: "unreachable"` with `dc_w: null`: the DC card is unavailable and the server card shows the mode. |
+| Malformed message | Dropped; never an exception in a handler or a thread. A bad `dc_w` alone becomes `None`. |
 | Wrong setpoint topic setting | Refused at start-up with a clear message. |
 
 ## Testing
 
 All with the standard `unittest`, as in the existing suite.
 
-- **Inverter reader**, against the existing `FakeInverter`: decodes the scale factors; takes the module whose id is 1; gives `None` for 65535; reconnects and re-walks the chain after a dropped connection; never writes (the fake records every write, and the test asserts the list stays empty).
-- **Subscriber**, against a fake client in the style of `test_server.py`: each parser on good, malformed, out-of-range and non-finite input; retained messages flagged stale and kept out of the history; subscription renewed on a second `on_connect`; the setpoint topic validation.
+- **Parsers**, on good, malformed, out-of-range and non-finite input, including `dc_w` (kept above 12 000 W up to 30 000 W, `None` beyond, and a bad `dc_w` keeping the target).
+- **Subscriber**, against a fake client in the style of `test_server.py`: retained messages flagged stale and kept out of the history; a retained copy never overwriting a fresh value; subscription renewed on a second `on_connect`; the setpoint topic validation; the inverter card unavailable while the server reports `unreachable`.
 - **History**, with a fake clock: gaps are `None`, the ring stops at 600 frames, the raw samples are averaged per second, a stale source is recorded as `None`.
-- **Web and page**: both endpoints, the Host check, and static checks on the page (no `innerHTML`, a canvas, four legend entries). The existing charger tests must still pass unchanged.
-- **Live check** (after the suite): the page against the real broker and inverter, with the setpoint server driving the inverter at the same time. The chart's DC line must agree with `evsim/inverter` `dc_w`.
+- **Web and page**: both endpoints, the Host check, and static checks on the page (no `innerHTML`, a canvas, four legend entries). The existing charger tests must still pass unchanged, apart from the one assertion on the page's heading (the heading becomes "EVSim").
+- **Live check** (after the suite): the page against the real broker, with the setpoint server driving the inverter. The chart's DC line must equal `dc_w` in `evsim/inverter`, and, once, agree within a few watts with `tools/fronius_modbus.py status` (read-only), to confirm that the number the writer publishes is the inverter's own.
 
 ## Risks and open points
 
-- The GEN24 now has up to three Modbus clients (the setpoint server's writer, this page, any tool). Two at once worked on 2026-10-01; three are untested. The reader isolates its failures, so the worst case is a missing DC line. The live check runs all three.
-- Model 160 is read, not model 103, so the page cannot show the inverter's own state when the setpoint server runs without `--inverter`.
+- The DC power and the DC target exist only while the setpoint server runs with `--inverter`. When the car emulation replaces `evsim/setpoint`, something must still publish `evsim/inverter` with `dc_w`. If the inverter writer moves out of the setpoint server, this page follows the message; if the message goes away, a direct reader (see below) is the way back.
+- The page cannot show the inverter's own state, AC power or grid values.
 - The car emulation's message format is unknown, so `parse_setpoint` is a guess at `setpoint_w` and `status` until that design exists.
 
 ## Not in scope
 
-Writing to the inverter or publishing to MQTT; AC, grid, DC voltage and current values; any persistent history; authentication; the amps-to-watts conversion (`memory/evsim-amps-to-watts.md`); the car emulation itself.
+Writing to the inverter or publishing to MQTT; reading the inverter directly over Modbus (an independent view for when the setpoint server is not running: the dropped first version is in commit 2d4d134, and would be a read-only reader of SunSpec model 160 feeding the same `inverter.dc_w` reading); AC, grid, DC voltage and current values; any persistent history; authentication; the amps-to-watts conversion (`memory/evsim-amps-to-watts.md`); the car emulation itself.

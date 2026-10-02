@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend the local charger page into an EVSim dashboard: the inverter's MPPT 1 DC power (Modbus TCP), the board's `evsim/cp`, the setpoint topic and the server's `evsim/inverter` target (MQTT), and a 10-minute chart of the four power values. Everything added is read-only.
+**Goal:** Extend the local charger page into an EVSim dashboard: the board's `evsim/cp`, the setpoint topic and the setpoint server's `evsim/inverter` message (its DC target and the inverter's MPPT 1 DC power), all over MQTT, with a 10-minute chart of the four power values. Everything added is read-only, and the page opens no connection to the inverter.
 
-**Architecture:** Three new units inside `server/charger_web/`: `InverterReader` (one thread, one Modbus connection, one model-160 read per second), `Telemetry` (a paho subscriber that keeps the latest parsed value of each topic) and `History` (a 1 Hz sampler into a 600-frame ring). A small `Dashboard` object composes them and gives `web.py` two new GET endpoints. The page gets a power-chain row and a canvas chart in two new scripts, leaving `app.js` untouched. Pure parsers and a staleness helper keep the logic testable without a network.
+**Architecture:** Two new units inside `server/charger_web/`: `Telemetry` (a paho subscriber that keeps the latest parsed value of each topic, including the inverter's DC power from `evsim/inverter`) and `History` (a 1 Hz sampler into a 600-frame ring). A small `Dashboard` object owns their lifecycle and gives `web.py` two new GET endpoints. The page gets a power-chain row and a canvas chart in two new scripts, leaving `app.js` untouched. Pure parsers and a staleness helper keep the logic testable without a network.
 
-**Tech Stack:** Python 3 standard library plus `paho-mqtt` (already in `server/requirements.txt`), `unittest` with the existing `FakeInverter`, plain HTML, CSS and browser JavaScript with a `<canvas>`. Node is used only to syntax-check the scripts and to run the chart's pure functions.
+**Tech Stack:** Python 3 standard library plus `paho-mqtt` (already in `server/requirements.txt`), `unittest` with a fake MQTT client, plain HTML, CSS and browser JavaScript with a `<canvas>`. Node is used only to syntax-check the scripts and to run the chart's pure functions.
 
-**Spec:** [docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md](../specs/2026-10-01-evsim-dashboard-design.md). It builds on [2026-10-01-charger-modbus-backend-design.md](../specs/2026-10-01-charger-modbus-backend-design.md) and [2026-09-30-inverter-writer-design.md](../specs/2026-09-30-inverter-writer-design.md). One addition to the spec's unit table: a `dashboard.py` that composes the three units (the spec says only that `__main__` builds them); Task 6 amends the spec.
+**Spec:** [docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md](../specs/2026-10-01-evsim-dashboard-design.md). It builds on [2026-10-01-charger-modbus-backend-design.md](../specs/2026-10-01-charger-modbus-backend-design.md) and [2026-09-30-inverter-writer-design.md](../specs/2026-09-30-inverter-writer-design.md). The spec was amended on 2026-10-02: the DC power comes from `evsim/inverter`, not from a direct Modbus reader; this plan follows the amended spec.
 
 Work on branch `feat/evsim-dashboard`, in the main checkout. **Another session may also use this repository**: run `git branch --show-current` before every commit and stop if it is not `feat/evsim-dashboard`. All commands run from `server/` unless stated. Always run Python as `.venv/bin/python -B` so stale `.pyc` files cannot hide a failure.
 
@@ -16,11 +16,11 @@ Work on branch `feat/evsim-dashboard`, in the main checkout. **Another session m
 
 Every task's requirements include these, copied from the spec.
 
-- **Read-only.** The inverter is only ever read (Modbus function code 3); nothing is ever published to MQTT. No new write path exists. The one write in the process stays the charger's register 1000.
-- **Inverter: only the DC power.** MPPT 1's `DCW` from SunSpec model 160, **one read per second** (`INVERTER_POLL_PERIOD_S = 1`). The SunSpec chain is walked once per connection, only to find model 160. MPPT 1 is the module whose **id is 1**, not the first in the list. `dc_w = DCW x 10^DCW_SF`; a raw 65535 is `None`. Unit ID 1, port 502, default host `192.168.21.120` (`EVSIM_INVERTER_HOST`). Reconnect back-off 1 s up to 5 s.
+- **Read-only.** Nothing is ever published to MQTT, and the page opens no connection to the inverter. No new write path exists. The one write in the process stays the charger's register 1000 (the page's only Modbus peer is the AMTRON).
+- **Inverter: only the DC power**, taken from `dc_w` in `evsim/inverter` (MPPT 1's DC power as read once a second by the setpoint server's writer). `dc_w` is a finite number from 0 to 30 000 W (`MAX_DC_W`), else `None`, and the message is kept (a measurement can exceed the 12 kW setpoint cap, and one bad number must not cost the target).
 - **MQTT:** client id `evsim-charger-web` (it must differ from `evsim-setpoint-server`), connect asynchronously, 1 to 5 s reconnect delay, **subscribe inside `on_connect`** at QoS 0, no will, never publish. Topics `evsim/cp`, the setpoint topic (`EVSIM_SETPOINT_TOPIC`, default `evsim/setpoint`; refused at start-up if empty, longer than 128 characters or containing `+`, `#` or whitespace) and `evsim/inverter`. Broker `EVSIM_MQTT_HOST` (default `127.0.0.1`), port 1883.
-- **Parsers drop, never clamp:** a `setpoint_w` that is not a finite number from 0 to 12 000 is dropped. Parsers never raise.
-- **Readings** are `{"value", "status", "updated_at"}`. `status` is `ok` below the limit, `stale` at or above it (or retained), `unavailable` with no value. Limits: **3 s** for MQTT values, the existing `STALE_AFTER_S` (**5 s**) for the inverter, which is also `stale` while its link is down.
+- **Parsers drop, never clamp:** a `setpoint_w` (or an `evsim/inverter` `target_dc_w`) that is not a finite number from 0 to 12 000 is dropped with its message. Parsers never raise.
+- **Readings** are `{"value", "status", "updated_at"}`. `status` is `ok` below the limit, `stale` at or above it (or retained), `unavailable` with no value. The limit is **3 s** for every MQTT value, `dc_w` and `target_dc_w` included (they come from one message).
 - **Retained messages** are kept as the last known state but flagged stale and never enter the history.
 - **History:** in memory, **600 frames at 1 Hz**. Frame: `{"t": <UTC epoch seconds>, "cp_w", "setpoint_w", "target_dc_w", "dc_w"}`. `cp_w` is the mean of the raw `evsim/cp` `setpoint_w` samples received since the previous tick; the other three are the reading's value only if its status is `ok`, else `None`. Missed frames are absent, not filled.
 - **HTTP:** `GET /api/telemetry` and `GET /api/history`, loopback only, behind the same Host check and headers as the existing routes. `/api/charger/status` and the limit write are unchanged.
@@ -32,10 +32,10 @@ Every task's requirements include these, copied from the spec.
 Inputs and conditions the spec implies but the obvious tests would miss, most likely to bite first. Each has a test in the task named.
 
 - **A wildcard or blank setpoint topic in the environment** (`evsim/#`, `""`): the process must refuse to start with a clear message, not subscribe to everything. Task 1.
-- **A payload that is valid JSON but hostile:** `NaN`, `Infinity`, a 400-digit integer, `true`, a negative or 12 001 W value, a non-UTF-8 byte string, an array instead of an object. Each is dropped and the previous reading stays. Task 3.
-- **The retained `server_offline` message** delivered on every subscribe, including after a reconnect when a fresh live value is already held: it must not overwrite the live value, and on its own it must show as stale. Task 4.
-- **The broker is down at start-up, or the inverter is unreachable:** the page and the charger control still work, the affected cards say unavailable and the chart has a gap, and nothing raises in a thread. Tasks 2, 4 and 6.
-- **A taken port or a bad setting must start no poller**, and `stop()` before `start()` must do nothing. Task 6.
+- **A payload that is valid JSON but hostile:** `NaN`, `Infinity`, a 400-digit integer, `true`, a negative or 12 001 W value, a non-UTF-8 byte string, an array instead of an object. Each is dropped and the previous reading stays. A measured `dc_w` above the 12 kW setpoint cap but plausible (13 000 W) must be kept, and an absurd one must become `None` without costing the message its DC target. Task 2.
+- **The retained `server_offline` message** delivered on every subscribe, including after a reconnect when a fresh live value is already held: it must not overwrite the live value, and on its own it must show as stale. Task 3.
+- **The broker is down at start-up, or the setpoint server is stopped or not driving the inverter:** the page and the charger control still work, the affected cards say unavailable and the chart has a gap, and nothing raises in a thread. Tasks 3 and 5.
+- **A taken port or a bad setting must start no poller**, and `stop()` before `start()` must do nothing. Task 5.
 
 ---
 
@@ -48,8 +48,8 @@ Inputs and conditions the spec implies but the obvious tests would miss, most li
 
 **Interfaces:**
 - Produces:
-  - `config.inverter_host() -> str`, `config.mqtt_host() -> str` (both raise `ValueError` for a blank value or one containing `/ ? # @`), `config.setpoint_topic() -> str` (raises `ValueError`).
-  - Constants: `DEFAULT_INVERTER_HOST`, `INVERTER_PORT`, `INVERTER_UNIT`, `INVERTER_POLL_PERIOD_S`, `INVERTER_BACKOFF_MIN_S`, `INVERTER_BACKOFF_MAX_S`, `DEFAULT_MQTT_HOST`, `MQTT_PORT`, `MQTT_CLIENT_ID`, `MQTT_KEEPALIVE_S`, `MQTT_RECONNECT_MIN_S`, `MQTT_RECONNECT_MAX_S`, `MQTT_STALE_AFTER_S`, `TOPIC_CP`, `DEFAULT_SETPOINT_TOPIC`, `TOPIC_INVERTER`, `MAX_SETPOINT_W`, `HISTORY_WINDOW_S`, `HISTORY_PERIOD_S`.
+  - `config.mqtt_host() -> str` (raises `ValueError` for a blank value or one containing `/ ? # @`), `config.setpoint_topic() -> str` (raises `ValueError`).
+  - Constants: `DEFAULT_MQTT_HOST`, `MQTT_PORT`, `MQTT_CLIENT_ID`, `MQTT_KEEPALIVE_S`, `MQTT_RECONNECT_MIN_S`, `MQTT_RECONNECT_MAX_S`, `MQTT_STALE_AFTER_S`, `TOPIC_CP`, `DEFAULT_SETPOINT_TOPIC`, `TOPIC_INVERTER`, `MAX_SETPOINT_W`, `MAX_DC_W`, `HISTORY_WINDOW_S`, `HISTORY_PERIOD_S`.
   - `reading.reading(value, at, now, stale_after, force_stale=False, wall=time.time) -> dict` with keys `value`, `status`, `updated_at`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -64,7 +64,7 @@ from unittest import mock
 from charger_web import config
 from charger_web.reading import reading
 
-NAMES = ("EVSIM_INVERTER_HOST", "EVSIM_MQTT_HOST", "EVSIM_SETPOINT_TOPIC")
+NAMES = ("EVSIM_MQTT_HOST", "EVSIM_SETPOINT_TOPIC")
 
 
 class SettingsTest(unittest.TestCase):
@@ -76,26 +76,19 @@ class SettingsTest(unittest.TestCase):
             os.environ.pop(name, None)
 
     def test_the_defaults_are_the_lab_values(self):
-        self.assertEqual(config.inverter_host(), "192.168.21.120")
         self.assertEqual(config.mqtt_host(), "127.0.0.1")
         self.assertEqual(config.setpoint_topic(), "evsim/setpoint")
 
     def test_the_environment_overrides_them(self):
-        os.environ["EVSIM_INVERTER_HOST"] = " 10.0.0.5 "
-        os.environ["EVSIM_MQTT_HOST"] = "broker.lab"
+        os.environ["EVSIM_MQTT_HOST"] = " broker.lab "
         os.environ["EVSIM_SETPOINT_TOPIC"] = "evsim/electric_car"
-        self.assertEqual(
-            (config.inverter_host(), config.mqtt_host(), config.setpoint_topic()),
-            ("10.0.0.5", "broker.lab", "evsim/electric_car"),
-        )
+        self.assertEqual((config.mqtt_host(), config.setpoint_topic()), ("broker.lab", "evsim/electric_car"))
 
     def test_a_host_with_a_url_or_nothing_is_refused(self):
         for bad in ("http://x", "a/b", "", "   ", "user@host", "h?x", "h#x"):
-            for variable, function in (("EVSIM_INVERTER_HOST", config.inverter_host), ("EVSIM_MQTT_HOST", config.mqtt_host)):
-                os.environ[variable] = bad
-                with self.assertRaises(ValueError, msg=(variable, bad)):
-                    function()
-                del os.environ[variable]
+            os.environ["EVSIM_MQTT_HOST"] = bad
+            with self.assertRaises(ValueError, msg=bad):
+                config.mqtt_host()
 
     def test_a_setpoint_topic_with_a_wildcard_or_whitespace_is_refused(self):
         for bad in ("", "  ", "evsim/#", "evsim/+/x", "#", "a b", "evsim/\tx", "x" * 129):
@@ -171,13 +164,6 @@ MIN_LIMIT_A = 6                   # the lowest non-zero limit the page accepts
 MAX_LIMIT_A = 16                  # the highest limit the page accepts
 
 # The dashboard (docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md). Read-only.
-DEFAULT_INVERTER_HOST = "192.168.21.120"   # GEN24 12.0 Plus SC on the lab network
-INVERTER_PORT = 502
-INVERTER_UNIT = 1                 # the unit ID of the inverter over TCP is always 1
-INVERTER_POLL_PERIOD_S = 1        # one model-160 read per second
-INVERTER_BACKOFF_MIN_S = 1        # retry delay toward an unreachable inverter
-INVERTER_BACKOFF_MAX_S = 5
-
 DEFAULT_MQTT_HOST = "127.0.0.1"   # Mosquitto on the same computer
 MQTT_PORT = 1883
 MQTT_CLIENT_ID = "evsim-charger-web"   # must differ from "evsim-setpoint-server": equal ids kick each other off
@@ -189,6 +175,7 @@ TOPIC_CP = "evsim/cp"             # the board's telemetry, 5 Hz
 DEFAULT_SETPOINT_TOPIC = "evsim/setpoint"   # becomes evsim/electric_car with the car emulation
 TOPIC_INVERTER = "evsim/inverter"           # the setpoint server's inverter status, 1 Hz
 MAX_SETPOINT_W = 12000            # the inverter's rating; a larger setpoint_w is dropped, not clamped
+MAX_DC_W = 30000                  # a measured DC power above this is not believed (the inverter is a 12 kW unit)
 
 HISTORY_WINDOW_S = 600            # the chart shows the last 10 minutes
 HISTORY_PERIOD_S = 1              # one frame per second
@@ -203,10 +190,6 @@ def _host(variable, default):
 
 def charger_host():
     return _host("EVSIM_CHARGER_HOST", DEFAULT_CHARGER_HOST)
-
-
-def inverter_host():
-    return _host("EVSIM_INVERTER_HOST", DEFAULT_INVERTER_HOST)
 
 
 def mqtt_host():
@@ -268,325 +251,18 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 2: The inverter reader
-
-**Files:**
-- Create: `server/charger_web/inverter.py`
-- Test: `server/tests/test_dashboard_inverter.py`
-
-**Interfaces:**
-- Consumes: `charger_web.modbus.ModbusTcp(host, port, unit, timeout)` with `.read(address, count) -> list[int]`, `.close()`, raising `ModbusError` / `ModbusTransportError`; `charger_web.reading.reading`; `config.*` from Task 1; `tests/fake_inverter.py` (`FakeInverter`, `M160`).
-- Produces: `InverterReader(host=None, port=None, unit=None, clock=time.monotonic, wall=time.time, period_s=None)` with `poll_once() -> bool` (True on success), `reading() -> dict` (the Task 1 shape, in watts), `start()` (idempotent), `stop()`. No method writes.
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `server/tests/test_dashboard_inverter.py`:
-
-```python
-import socket
-import time
-import unittest
-from unittest import mock
-
-from fake_inverter import FakeInverter, M160
-from charger_web import config
-from charger_web.inverter import InverterReader
-
-MODULE_1 = M160 + 8     # the first module block of the fake's model 160
-DCW = 11                # the offset of DCW inside a module block
-
-
-class FakeClock:
-    def __init__(self, t=100.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
-class InverterReaderTest(unittest.TestCase):
-    def setUp(self):
-        self.fake = FakeInverter()
-        self.port = self.fake.start()
-        self.addCleanup(self.fake.stop)
-        self.clock = FakeClock()
-        self.reader = InverterReader("127.0.0.1", self.port, clock=self.clock)
-        self.addCleanup(self.reader.stop)
-
-    def test_it_reads_the_dc_power_of_mppt_1(self):
-        self.assertTrue(self.reader.poll_once())
-        result = self.reader.reading()
-        self.assertEqual((result["value"], result["status"]), (7272, "ok"))
-
-    def test_the_scale_factor_is_read_with_the_value(self):
-        self.fake.put(M160 + 2, [-1])
-        self.fake.put(MODULE_1 + DCW, [43210])
-        self.reader.poll_once()
-        self.assertEqual(self.reader.reading()["value"], 4321.0)
-
-    def test_it_takes_the_module_whose_id_is_1_not_the_first(self):
-        self.fake.put(MODULE_1, [2])
-        self.fake.put(MODULE_1 + DCW, [111])
-        self.fake.put(MODULE_1 + 20, [1])
-        self.fake.put(MODULE_1 + 20 + DCW, [5000])
-        self.reader.poll_once()
-        self.assertEqual(self.reader.reading()["value"], 5000)
-
-    def test_not_implemented_is_unavailable(self):
-        self.fake.put(MODULE_1 + DCW, [65535])
-        self.assertTrue(self.reader.poll_once())
-        result = self.reader.reading()
-        self.assertEqual((result["value"], result["status"]), (None, "unavailable"))
-
-    def test_without_a_module_with_id_1_it_is_unavailable(self):
-        for block in (0, 20, 40):
-            self.fake.put(MODULE_1 + block, [5 + block])
-        self.assertTrue(self.reader.poll_once())
-        self.assertEqual(self.reader.reading()["status"], "unavailable")
-
-    def test_after_the_first_poll_each_poll_is_one_request(self):
-        self.reader.poll_once()
-        with mock.patch.object(self.reader._modbus, "read", wraps=self.reader._modbus.read) as spy:
-            self.reader.poll_once()
-        self.assertEqual(spy.call_count, 1)
-
-    def test_it_never_writes(self):
-        for _ in range(3):
-            self.reader.poll_once()
-        self.assertEqual(self.fake.writes, [])
-        self.assertFalse(hasattr(self.reader, "write_single"))
-
-    def test_an_old_value_is_stale(self):
-        self.reader.poll_once()
-        self.clock.t += config.STALE_AFTER_S
-        result = self.reader.reading()
-        self.assertEqual((result["value"], result["status"]), (7272, "stale"))
-
-    def test_a_dropped_connection_goes_stale_then_recovers_with_a_fresh_walk(self):
-        self.reader.poll_once()
-        self.fake.stop()
-        self.assertFalse(self.reader.poll_once())
-        result = self.reader.reading()
-        self.assertEqual((result["value"], result["status"]), (7272, "stale"))   # the last good value, flagged
-        self.assertIsNone(self.reader._model)                                    # the chain is walked again
-        self.fake.start(self.port)
-        self.assertTrue(self.reader.poll_once())
-        self.assertEqual(self.reader.reading()["status"], "ok")
-        self.assertIsNotNone(self.reader._model)
-
-    def test_an_unreachable_inverter_is_unavailable_and_never_raises(self):
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        closed_port = sock.getsockname()[1]
-        sock.close()
-        reader = InverterReader("127.0.0.1", closed_port, clock=self.clock)
-        self.addCleanup(reader.stop)
-        self.assertFalse(reader.poll_once())
-        result = reader.reading()
-        self.assertEqual((result["value"], result["status"]), (None, "unavailable"))
-
-    def test_a_missing_sunspec_marker_is_an_error_not_a_crash(self):
-        self.fake.put(40000, [0, 0])
-        self.assertFalse(self.reader.poll_once())
-        self.assertEqual(self.reader.reading()["status"], "unavailable")
-
-    def test_a_model_160_that_is_too_short_is_an_error_not_a_crash(self):
-        self.fake.put(self.fake.chain[160][0] - 1, [3])    # the length register of model 160
-        self.assertFalse(self.reader.poll_once())
-
-    def test_the_thread_polls_and_stops_and_start_is_idempotent(self):
-        reader = InverterReader("127.0.0.1", self.port, period_s=0.05)
-        self.addCleanup(reader.stop)
-        reader.start()
-        thread = reader._thread
-        reader.start()
-        self.assertIs(reader._thread, thread)
-        deadline = time.monotonic() + 3
-        while reader.reading()["value"] is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-        self.assertEqual(reader.reading()["value"], 7272)
-        reader.stop()
-        self.assertFalse(thread.is_alive())
-
-
-if __name__ == "__main__":
-    unittest.main()
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `.venv/bin/python -B -m unittest discover -s tests -p 'test_dashboard_inverter.py'`
-Expected: FAIL with `No module named 'charger_web.inverter'`.
-
-- [ ] **Step 3: Write the implementation**
-
-Create `server/charger_web/inverter.py`:
-
-```python
-"""Reads the inverter's MPPT 1 DC power over Modbus TCP, once a second. Read-only by construction.
-
-One thread owns one connection. Only SunSpec model 160 (the MPPT extension) is read, in a single request, so
-the scale factor and the value come from the same instant: during start-up the GEN24's DC power once read
-10x too large because a scale factor changed between two reads. Background: memory/evsim-inverter-fronius.md.
-"""
-
-from __future__ import annotations
-
-import logging
-import threading
-import time
-
-from . import config
-from .modbus import ModbusError, ModbusTcp
-from .reading import reading
-
-log = logging.getLogger("charger_web.inverter")
-
-SUNSPEC_BASE = 40000
-SUNSPEC_MARKER = [0x5375, 0x6E53]      # "SunS"
-CHAIN_LIMIT = 4000                     # registers to walk before giving up
-END_OF_CHAIN = 0xFFFF
-MODEL_MPPT = 160
-M160_SF_W, M160_N, M160_MODULES, M160_BLOCK = 2, 6, 8, 20   # offsets inside model 160, registers per module
-MODULE_ID, MODULE_DCW = 0, 11                               # offsets inside one module block
-NOT_IMPLEMENTED = 0xFFFF
-MPPT_ONE = 1
-
-
-def _s16(raw):
-    return raw - 65536 if raw >= 32768 else raw
-
-
-class InverterReader:
-    def __init__(self, host=None, port=None, unit=None, clock=time.monotonic, wall=time.time, period_s=None):
-        self._modbus = ModbusTcp(
-            host or config.inverter_host(), port or config.INVERTER_PORT,
-            config.INVERTER_UNIT if unit is None else unit, config.MODBUS_TIMEOUT_S,
-        )
-        self._clock = clock
-        self._wall = wall
-        self._period = config.INVERTER_POLL_PERIOD_S if period_s is None else period_s
-        self._lock = threading.Lock()          # guards the cache below
-        self._value = None
-        self._at = None
-        self._error = None
-        self._model = None                     # (first data address, length) of model 160, once found
-        self._failing = False
-        self._stop = threading.Event()
-        self._thread = None
-
-    def _locate(self):
-        if self._modbus.read(SUNSPEC_BASE, 2) != SUNSPEC_MARKER:
-            raise ModbusError("no SunSpec marker at 40000")
-        address = SUNSPEC_BASE + 2
-        while address < SUNSPEC_BASE + CHAIN_LIMIT:
-            model, length = self._modbus.read(address, 2)
-            if model == END_OF_CHAIN:
-                break
-            if model == MODEL_MPPT:
-                return address + 2, length
-            address += 2 + length
-        raise ModbusError("the inverter has no SunSpec model 160")
-
-    @staticmethod
-    def _parse(words):
-        if len(words) < M160_MODULES:
-            raise ModbusError("SunSpec model 160 is too short")
-        scale = 10 ** _s16(words[M160_SF_W])
-        count = min(words[M160_N], (len(words) - M160_MODULES) // M160_BLOCK)
-        for index in range(count):
-            start = M160_MODULES + M160_BLOCK * index
-            block = words[start:start + M160_BLOCK]
-            if block[MODULE_ID] == MPPT_ONE:
-                raw = block[MODULE_DCW]
-                return None if raw == NOT_IMPLEMENTED else round(raw * scale, 3)
-        return None
-
-    def poll_once(self):
-        """One read of model 160. True on success; on any Modbus failure the older value simply ages."""
-        try:
-            if self._model is None:
-                self._model = self._locate()
-            address, length = self._model
-            value = self._parse(self._modbus.read(address, length))
-        except ModbusError as exc:
-            self._model = None                 # the next connection walks the chain again
-            self._modbus.close()
-            with self._lock:
-                self._error = str(exc)
-            if not self._failing:
-                log.warning("cannot read the inverter: %s", exc)
-            self._failing = True
-            return False
-        now = self._clock()
-        with self._lock:
-            self._value, self._at, self._error = value, now, None
-        if self._failing:
-            log.info("the inverter is readable again")
-        self._failing = False
-        return True
-
-    def reading(self):
-        with self._lock:
-            value, at, error = self._value, self._at, self._error
-        return reading(value, at, self._clock(), config.STALE_AFTER_S, force_stale=error is not None, wall=self._wall)
-
-    def start(self):
-        if self._thread is not None and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(target=self._run, name="inverter-reader", daemon=True)
-        self._thread.start()
-
-    def _run(self):
-        backoff = config.INVERTER_BACKOFF_MIN_S
-        while not self._stop.is_set():
-            try:
-                ok = self.poll_once()
-            except Exception:                  # one bad poll must never stop the reader
-                log.exception("inverter poll failed")
-                ok = False
-            if ok:
-                backoff, delay = config.INVERTER_BACKOFF_MIN_S, self._period
-            else:
-                delay, backoff = backoff, min(backoff * 2, config.INVERTER_BACKOFF_MAX_S)
-            self._stop.wait(delay)
-
-    def stop(self):
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2 * config.MODBUS_TIMEOUT_S + 2)
-        self._modbus.close()
-```
-
-- [ ] **Step 4: Run it to verify it passes**
-
-Run: `.venv/bin/python -B -m unittest discover -s tests -p 'test_dashboard_inverter.py'`
-Expected: OK.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git branch --show-current   # must print feat/evsim-dashboard
-git add server/charger_web/inverter.py server/tests/test_dashboard_inverter.py
-git commit -m "Read the inverter's MPPT 1 DC power once a second
-
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
-```
-
----
-
-### Task 3: The MQTT payload parsers
+### Task 2: The MQTT payload parsers
 
 **Files:**
 - Create: `server/charger_web/parsers.py`
 - Test: `server/tests/test_dashboard_parsers.py`
 
 **Interfaces:**
-- Consumes: `config.MAX_SETPOINT_W`.
+- Consumes: `config.MAX_SETPOINT_W`, `config.MAX_DC_W`.
 - Produces (all take `bytes | str | None`, never raise, return `None` for anything unusable):
   - `parse_cp(payload) -> {"setpoint_w": float, "state": str | None, "status": str | None} | None`
   - `parse_setpoint(payload) -> {"setpoint_w": float, "status": str | None} | None` (the one function to change for the car emulation)
-  - `parse_inverter(payload) -> {"target_dc_w": float | None, "mode": str | None, "inverter_state": int | None} | None`
+  - `parse_inverter(payload) -> {"target_dc_w": float | None, "dc_w": float | None, "mode": str | None, "inverter_state": int | None} | None` (a target outside 0 to 12 000 W drops the message; a `dc_w` outside 0 to 30 000 W becomes `None` and the message stays)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -649,18 +325,29 @@ class SetpointTest(unittest.TestCase):
 class InverterTest(unittest.TestCase):
     def test_the_servers_status(self):
         payload = b'{"mode":"capped","target_dc_w":4312.6,"cap_ac_w":4182.7,"dc_w":4304.6,"ac_w":4181,"inverter_state":4,"error":null,"ts":"2026-10-01T15:13:04Z"}'
-        self.assertEqual(parse_inverter(payload), {"target_dc_w": 4312.6, "mode": "capped", "inverter_state": 4})
+        self.assertEqual(parse_inverter(payload), {"target_dc_w": 4312.6, "dc_w": 4304.6, "mode": "capped", "inverter_state": 4})
 
-    def test_a_null_target_is_kept_as_none(self):
-        parsed = parse_inverter(b'{"mode":"unreachable","target_dc_w":null,"inverter_state":null}')
-        self.assertEqual(parsed, {"target_dc_w": None, "mode": "unreachable", "inverter_state": None})
+    def test_null_values_are_kept_as_none(self):
+        parsed = parse_inverter(b'{"mode":"unreachable","target_dc_w":null,"dc_w":null,"inverter_state":null}')
+        self.assertEqual(parsed, {"target_dc_w": None, "dc_w": None, "mode": "unreachable", "inverter_state": None})
 
-    def test_a_missing_target_is_none_too(self):
-        self.assertEqual(parse_inverter(b'{"mode":"zero"}'), {"target_dc_w": None, "mode": "zero", "inverter_state": None})
+    def test_missing_values_are_none_too(self):
+        self.assertEqual(parse_inverter(b'{"mode":"zero"}'),
+                         {"target_dc_w": None, "dc_w": None, "mode": "zero", "inverter_state": None})
 
     def test_a_target_that_is_not_a_good_power_drops_the_message(self):
         for bad in (b'"x"', b"true", b"-5", b"NaN", b"12001", b"[]"):
             self.assertIsNone(parse_inverter(b'{"target_dc_w": ' + bad + b"}"), bad)
+
+    def test_a_measured_power_can_exceed_the_setpoint_cap(self):
+        self.assertEqual(parse_inverter(b'{"dc_w": 13000}')["dc_w"], 13000.0)
+        self.assertEqual(parse_inverter(b'{"dc_w": 30000}')["dc_w"], 30000.0)
+        self.assertEqual(parse_inverter(b'{"dc_w": 0}')["dc_w"], 0.0)
+
+    def test_a_bad_measured_power_becomes_none_and_keeps_the_target(self):
+        for bad in (b'"x"', b"true", b"-1", b"NaN", b"Infinity", b"30001", b"[]", b"1" + b"0" * 400):
+            parsed = parse_inverter(b'{"target_dc_w": 4300, "dc_w": ' + bad + b"}")
+            self.assertEqual((parsed["target_dc_w"], parsed["dc_w"]), (4300.0, None), bad)
 
     def test_a_bad_inverter_state_is_none_but_the_message_stays(self):
         for bad in (b'"4"', b"true", b"-1", b"256", b"4.5", b"null"):
@@ -670,7 +357,6 @@ class InverterTest(unittest.TestCase):
     def test_non_objects_are_dropped(self):
         for payload in NOT_OBJECTS:
             self.assertIsNone(parse_inverter(payload), payload)
-
 
 if __name__ == "__main__":
     unittest.main()
@@ -689,7 +375,7 @@ Create `server/charger_web/parsers.py`:
 """Parsers for the MQTT payloads the dashboard reads.
 
 Pure functions that never raise: anything unusable gives None. A power outside 0 to MAX_SETPOINT_W is
-dropped, never clamped (the setpoint server does the same). Text fields are short strings or None; the
+dropped, never clamped (the setpoint server does the same); only a measured DC power is bounded more loosely, and a bad one becomes None without dropping its message. Text fields are short strings or None; the
 page shows them with textContent, so their content cannot inject markup.
 """
 
@@ -717,6 +403,18 @@ def _watts(value):
             return None
         return float(value)
     except OverflowError:           # an integer too large to convert to a float
+        return None
+
+
+def _dc_watts(value):
+    """A measured DC power: finite, from 0 to MAX_DC_W (it may exceed the setpoint cap), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        if not math.isfinite(value) or not 0 <= value <= config.MAX_DC_W:
+            return None
+        return float(value)
+    except OverflowError:
         return None
 
 
@@ -753,7 +451,7 @@ def parse_setpoint(payload):
 
 
 def parse_inverter(payload):
-    """The setpoint server's evsim/inverter status: its DC target, its mode and the inverter state."""
+    """The setpoint server's evsim/inverter status: its DC target, the inverter's measured DC power, the mode and the state."""
     data = _object(payload)
     if data is None:
         return None
@@ -762,7 +460,8 @@ def parse_inverter(payload):
         target = _watts(target)
         if target is None:
             return None
-    return {"target_dc_w": target, "mode": _text(data.get("mode")), "inverter_state": _state(data.get("inverter_state"))}
+    return {"target_dc_w": target, "dc_w": _dc_watts(data.get("dc_w")), "mode": _text(data.get("mode")),
+            "inverter_state": _state(data.get("inverter_state"))}
 ```
 
 - [ ] **Step 4: Run it to verify it passes**
@@ -782,7 +481,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: The MQTT subscriber
+### Task 3: The MQTT subscriber
 
 **Files:**
 - Create: `server/charger_web/telemetry.py`
@@ -793,7 +492,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Consumes: `parsers.parse_cp/parse_setpoint/parse_inverter`, `reading.reading`, `config.*`.
 - Produces:
   - `Telemetry(client, setpoint_topic, clock=time.monotonic, wall=time.time)`: registers `on_connect`, `on_message`, `on_disconnect` on `client`; `snapshot() -> dict`; `drain_cp_samples() -> list[float]` (returns and clears the raw `evsim/cp` `setpoint_w` values received since the last call, never including retained ones).
-  - `snapshot()` shape: `{"mqtt": {"connected": bool}, "board": {"setpoint_w": reading, "state": str|None, "status": str|None}, "setpoint": {"topic": str, "setpoint_w": reading, "status": str|None}, "server": {"target_dc_w": reading, "mode": str|None, "inverter_state": int|None}}`.
+  - `snapshot()` shape: `{"mqtt": {"connected": bool}, "board": {"setpoint_w": reading, "state": str|None, "status": str|None}, "setpoint": {"topic": str, "setpoint_w": reading, "status": str|None}, "server": {"target_dc_w": reading, "mode": str|None, "inverter_state": int|None}, "inverter": {"dc_w": reading}}` (`server` and `inverter` come from the same `evsim/inverter` message).
   - `build_client() -> paho.mqtt.client.Client` (client id `evsim-charger-web`, 1 to 5 s reconnect delay; raises `ValueError` if paho is missing).
   - `tests/fake_mqtt.py`: `FakeMqttClient` (records `subscribed` and `calls`; helpers `connect(reason=OK)`, `drop()`, `deliver(topic, payload, retain=False)`), `OK`, `REFUSED`.
 
@@ -903,6 +602,7 @@ class TelemetryTest(unittest.TestCase):
         self.assertEqual(snap["board"]["setpoint_w"]["status"], "unavailable")
         self.assertEqual(snap["setpoint"]["setpoint_w"]["status"], "unavailable")
         self.assertEqual(snap["server"]["target_dc_w"]["status"], "unavailable")
+        self.assertEqual(snap["inverter"]["dc_w"]["status"], "unavailable")
         self.assertEqual((snap["board"]["state"], snap["setpoint"]["status"], snap["server"]["mode"]), (None, None, None))
         json.dumps(snap, allow_nan=False)
 
@@ -915,6 +615,7 @@ class TelemetryTest(unittest.TestCase):
         self.assertEqual((snap["board"]["state"], snap["board"]["status"]), ("C", "live"))
         self.assertEqual((snap["setpoint"]["setpoint_w"]["value"], snap["setpoint"]["status"]), (4312.0, "ok"))
         self.assertEqual(snap["server"]["target_dc_w"]["value"], 4312.6)
+        self.assertEqual((snap["inverter"]["dc_w"]["value"], snap["inverter"]["dc_w"]["status"]), (4304.6, "ok"))
         self.assertEqual((snap["server"]["mode"], snap["server"]["inverter_state"]), ("capped", 4))
         json.dumps(snap, allow_nan=False)
 
@@ -922,6 +623,23 @@ class TelemetryTest(unittest.TestCase):
         self.client.deliver("evsim/inverter", '{"mode":"zero","target_dc_w":null,"inverter_state":4}')
         server = self.snapshot()["server"]
         self.assertEqual((server["target_dc_w"]["status"], server["mode"]), ("unavailable", "zero"))
+
+    def test_an_unreachable_inverter_makes_the_dc_card_unavailable_and_shows_the_mode(self):
+        self.client.deliver("evsim/inverter", '{"mode":"unreachable","target_dc_w":null,"dc_w":null,"inverter_state":null}')
+        snap = self.snapshot()
+        self.assertEqual(
+            (snap["inverter"]["dc_w"]["status"], snap["server"]["target_dc_w"]["status"], snap["server"]["mode"]),
+            ("unavailable", "unavailable", "unreachable"))
+
+    def test_the_dc_power_and_the_target_go_stale_together(self):
+        self.client.deliver("evsim/inverter", INVERTER)
+        self.clock.t += config.MQTT_STALE_AFTER_S
+        snap = self.snapshot()
+        self.assertEqual((snap["inverter"]["dc_w"]["status"], snap["server"]["target_dc_w"]["status"]), ("stale", "stale"))
+
+    def test_a_retained_inverter_message_is_stale(self):
+        self.client.deliver("evsim/inverter", INVERTER, retain=True)
+        self.assertEqual(self.snapshot()["inverter"]["dc_w"]["status"], "stale")
 
     def test_a_malformed_message_is_dropped_and_the_old_value_stays(self):
         self.client.deliver("evsim/cp", "not json")
@@ -1128,6 +846,7 @@ class Telemetry:
                          "status": text("setpoint", "status")},
             "server": {"target_dc_w": value("server", "target_dc_w"), "mode": text("server", "mode"),
                        "inverter_state": text("server", "inverter_state")},
+            "inverter": {"dc_w": value("server", "dc_w")},      # the same message as the server's DC target
         }
 ```
 
@@ -1148,15 +867,15 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: The history sampler
+### Task 4: The history sampler
 
 **Files:**
 - Create: `server/charger_web/history.py`
 - Test: `server/tests/test_dashboard_history.py`
 
 **Interfaces:**
-- Consumes: an object with `drain_cp_samples() -> list[float]` and `snapshot()` (Task 4's shape, only `["setpoint"]["setpoint_w"]` and `["server"]["target_dc_w"]` are read); an object with `reading() -> dict` (Task 2); `config.HISTORY_*`.
-- Produces: `History(telemetry, inverter, clock=time.monotonic, wall=time.time, period_s=None)` with `tick()`, `snapshot() -> {"interval_s": 1, "window_s": 600, "frames": [frame, ...]}` (oldest first), `start()` (idempotent), `stop()`.
+- Consumes: an object with `drain_cp_samples() -> list[float]` and `snapshot()` (Task 3's shape; `["setpoint"]["setpoint_w"]`, `["server"]["target_dc_w"]` and `["inverter"]["dc_w"]` are read); `config.HISTORY_*`.
+- Produces: `History(telemetry, clock=time.monotonic, wall=time.time, period_s=None)` with `tick()`, `snapshot() -> {"interval_s": 1, "window_s": 600, "frames": [frame, ...]}` (oldest first), `start()` (idempotent), `stop()`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1179,29 +898,22 @@ class StubTelemetry:
         self.samples = []
         self.setpoint = rd(4312.0)
         self.target = rd(4312.6)
+        self.dc = rd(4304.6)
 
     def drain_cp_samples(self):
         samples, self.samples = self.samples, []
         return samples
 
     def snapshot(self):
-        return {"setpoint": {"setpoint_w": self.setpoint}, "server": {"target_dc_w": self.target}}
-
-
-class StubInverter:
-    def __init__(self):
-        self.dc = rd(4304.6)
-
-    def reading(self):
-        return self.dc
+        return {"setpoint": {"setpoint_w": self.setpoint}, "server": {"target_dc_w": self.target},
+                "inverter": {"dc_w": self.dc}}
 
 
 class HistoryTest(unittest.TestCase):
     def setUp(self):
         self.telemetry = StubTelemetry()
-        self.inverter = StubInverter()
         self.wall = itertools.count(1_700_000_000)
-        self.history = History(self.telemetry, self.inverter, wall=lambda: next(self.wall))
+        self.history = History(self.telemetry, wall=lambda: next(self.wall))
 
     def frames(self):
         return self.history.snapshot()["frames"]
@@ -1227,13 +939,13 @@ class HistoryTest(unittest.TestCase):
     def test_a_stale_or_unavailable_source_is_a_gap(self):
         self.telemetry.setpoint = rd(4312.0, "stale")
         self.telemetry.target = rd(None, "unavailable")
-        self.inverter.dc = rd(4304.6, "stale")
+        self.telemetry.dc = rd(4304.6, "stale")
         self.history.tick()
         frame = self.frames()[0]
         self.assertEqual((frame["setpoint_w"], frame["target_dc_w"], frame["dc_w"]), (None, None, None))
 
     def test_values_are_rounded_to_a_tenth_of_a_watt(self):
-        self.inverter.dc = rd(4304.5678)
+        self.telemetry.dc = rd(4304.5678)
         self.history.tick()
         self.assertEqual(self.frames()[0]["dc_w"], 4304.6)
 
@@ -1253,7 +965,7 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(len(self.frames()), 1)
 
     def test_the_thread_samples_and_stops_and_start_is_idempotent(self):
-        history = History(self.telemetry, self.inverter, period_s=0.02)
+        history = History(self.telemetry, period_s=0.02)
         history.start()
         thread = history._thread
         history.start()
@@ -1305,9 +1017,8 @@ def _ok(source):
 
 
 class History:
-    def __init__(self, telemetry, inverter, clock=time.monotonic, wall=time.time, period_s=None):
+    def __init__(self, telemetry, clock=time.monotonic, wall=time.time, period_s=None):
         self._telemetry = telemetry
-        self._inverter = inverter
         self._clock = clock
         self._wall = wall
         self._period = config.HISTORY_PERIOD_S if period_s is None else period_s
@@ -1325,7 +1036,7 @@ class History:
             "cp_w": round(sum(samples) / len(samples), 1) if samples else None,
             "setpoint_w": _ok(snap["setpoint"]["setpoint_w"]),
             "target_dc_w": _ok(snap["server"]["target_dc_w"]),
-            "dc_w": _ok(self._inverter.reading()),
+            "dc_w": _ok(snap["inverter"]["dc_w"]),
         }
         with self._lock:
             self._frames.append(frame)
@@ -1376,19 +1087,18 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Compose the dashboard, serve it, wire the entry point
+### Task 5: Compose the dashboard, serve it, wire the entry point
 
 **Files:**
 - Create: `server/charger_web/dashboard.py`
 - Modify: `server/charger_web/web.py` (overwritten)
 - Modify: `server/charger_web/__main__.py` (overwritten)
-- Modify: `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md` (two small amendments)
 - Test: `server/tests/test_dashboard_web.py`
 
 **Interfaces:**
-- Consumes: `InverterReader` (Task 2), `Telemetry`, `build_client` (Task 4), `History` (Task 5), `FakeInverter`, `FakeMqttClient`, `config.*`.
+- Consumes: `Telemetry`, `build_client` (Task 3), `History` (Task 4), `FakeMqttClient`, `config.*`.
 - Produces:
-  - `Dashboard(inverter, telemetry, history, mqtt_client=None, broker=None)`: `telemetry() -> dict` (Task 4's snapshot plus `"inverter": {"dc_w": reading}`), `history() -> dict`, `start()`, `stop()` (both idempotent; `stop()` before `start()` does nothing). `broker` is `(host, port)`.
+  - `Dashboard(telemetry, history, mqtt_client=None, broker=None)`: `telemetry() -> dict` (Task 3's snapshot), `history() -> dict`, `start()`, `stop()` (both idempotent; `stop()` before `start()` does nothing). `broker` is `(host, port)`.
   - `build_dashboard() -> Dashboard` (reads the three settings, raises `ValueError` on a bad one, builds the real paho client, starts nothing).
   - `create_server(charger=None, host=..., port=..., dashboard=None)`; with a dashboard, `GET /api/telemetry` and `GET /api/history`; a failing dashboard is a 500 JSON error, never a dropped connection.
 
@@ -1407,30 +1117,24 @@ import threading
 import unittest
 from unittest import mock
 
-from fake_inverter import FakeInverter
 from fake_mqtt import FakeMqttClient
 from charger_web import __main__ as charger_main
 from charger_web.dashboard import Dashboard
 from charger_web.history import History
-from charger_web.inverter import InverterReader
 from charger_web.telemetry import Telemetry
 from charger_web.web import create_server
 
 CP = '{"setpoint_w":4361,"state":"C","status":"live"}'
+INVERTER = '{"mode":"capped","target_dc_w":4312.6,"dc_w":4304.6,"inverter_state":4}'
 
 
 class DashboardTest(unittest.TestCase):
     def setUp(self):
-        self.fake = FakeInverter()
-        port = self.fake.start()
-        self.addCleanup(self.fake.stop)
         self.client = FakeMqttClient()
-        self.inverter = InverterReader("127.0.0.1", port)
         self.telemetry = Telemetry(self.client, "evsim/setpoint")
-        self.history = History(self.telemetry, self.inverter)
-        self.dashboard = Dashboard(self.inverter, self.telemetry, self.history, self.client, ("127.0.0.1", 1883))
+        self.history = History(self.telemetry)
+        self.dashboard = Dashboard(self.telemetry, self.history, self.client, ("127.0.0.1", 1883))
         self.addCleanup(self.dashboard.stop)
-        self.addCleanup(self.inverter.stop)
 
     def test_before_anything_arrives_everything_is_unavailable_and_serializes(self):
         data = self.dashboard.telemetry()
@@ -1440,20 +1144,20 @@ class DashboardTest(unittest.TestCase):
         json.dumps(data, allow_nan=False)
         json.dumps(self.dashboard.history(), allow_nan=False)
 
-    def test_telemetry_joins_the_inverter_and_the_mqtt_values(self):
+    def test_telemetry_carries_the_mqtt_values_including_the_inverters_dc_power(self):
         self.client.connect()
         self.client.deliver("evsim/cp", CP)
-        self.inverter.poll_once()
+        self.client.deliver("evsim/inverter", INVERTER)
         data = self.dashboard.telemetry()
-        self.assertEqual(data["inverter"]["dc_w"]["value"], 7272)
         self.assertEqual(data["board"]["setpoint_w"]["value"], 4361.0)
+        self.assertEqual((data["inverter"]["dc_w"]["value"], data["server"]["target_dc_w"]["value"]), (4304.6, 4312.6))
         self.assertTrue(data["mqtt"]["connected"])
 
     def test_history_returns_what_the_sampler_took(self):
-        self.inverter.poll_once()
+        self.client.deliver("evsim/inverter", INVERTER)
         self.history.tick()
         frames = self.dashboard.history()["frames"]
-        self.assertEqual((len(frames), frames[0]["dc_w"]), (1, 7272))
+        self.assertEqual((len(frames), frames[0]["dc_w"], frames[0]["target_dc_w"]), (1, 4304.6, 4312.6))
 
     def test_start_connects_the_broker_and_stop_undoes_it_in_order(self):
         self.dashboard.start()
@@ -1468,7 +1172,6 @@ class DashboardTest(unittest.TestCase):
     def test_stop_before_start_touches_nothing(self):
         self.dashboard.stop()
         self.assertEqual(self.client.calls, [])
-
 
 class StubDashboard:
     def __init__(self):
@@ -1568,17 +1271,15 @@ Expected: FAIL with `No module named 'charger_web.dashboard'`.
 Create `server/charger_web/dashboard.py`:
 
 ```python
-"""Composes the three read-only sources of the dashboard and gives the web layer two methods to call."""
+"""Owns the lifecycle of the dashboard's two read-only sources and gives the web layer two methods to call."""
 
 from . import config
 from .history import History
-from .inverter import InverterReader
 from .telemetry import Telemetry, build_client
 
 
 class Dashboard:
-    def __init__(self, inverter, telemetry, history, mqtt_client=None, broker=None):
-        self._inverter = inverter
+    def __init__(self, telemetry, history, mqtt_client=None, broker=None):
         self._telemetry = telemetry
         self._history = history
         self._client = mqtt_client
@@ -1586,20 +1287,17 @@ class Dashboard:
         self._started = False
 
     def telemetry(self):
-        """The latest readings: the MQTT values from the subscriber plus the inverter's DC power."""
-        data = self._telemetry.snapshot()
-        data["inverter"] = {"dc_w": self._inverter.reading()}
-        return data
+        """The latest readings: board, setpoint, the server's target and the inverter's DC power."""
+        return self._telemetry.snapshot()
 
     def history(self):
         return self._history.snapshot()
 
     def start(self):
-        """Start the background readers. connect_async: a broker that is down is retried, never raised."""
+        """Connect the broker and start the sampler. connect_async: a broker that is down is retried, never raised."""
         if self._started:
             return
         self._started = True
-        self._inverter.start()
         if self._client is not None:
             host, port = self._broker
             self._client.connect_async(host, port, keepalive=config.MQTT_KEEPALIVE_S)
@@ -1614,17 +1312,15 @@ class Dashboard:
         if self._client is not None:
             self._client.disconnect()
             self._client.loop_stop()
-        self._inverter.stop()
 
 
 def build_dashboard():
     """The real dashboard from the environment. Raises ValueError for a bad setting; starts nothing."""
-    inverter_host, mqtt_host, topic = config.inverter_host(), config.mqtt_host(), config.setpoint_topic()
-    inverter = InverterReader(inverter_host)
+    mqtt_host, topic = config.mqtt_host(), config.setpoint_topic()
     client = build_client()
     telemetry = Telemetry(client, topic)
-    history = History(telemetry, inverter)
-    return Dashboard(inverter, telemetry, history, client, (mqtt_host, config.MQTT_PORT))
+    history = History(telemetry)
+    return Dashboard(telemetry, history, client, (mqtt_host, config.MQTT_PORT))
 ```
 
 Overwrite `server/charger_web/web.py`:
@@ -1854,32 +1550,17 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-Amend the spec. In `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md`, in the unit table replace the row
-
-```
-| `web.py` | Two new GET endpoints. Everything existing is unchanged. | |
-```
-
-with
-
-```
-| `dashboard.py` — `Dashboard` | Composes the three units above, starts and stops them, and gives `web.py` two methods: the latest readings and the history. | the three units |
-| `web.py` | Two new GET endpoints. Everything existing is unchanged. | `dashboard.py` |
-```
-
-and in the Testing section replace `The existing charger tests must still pass unchanged.` with `The existing charger tests must still pass unchanged, apart from the one assertion on the page's heading (the heading becomes "EVSim").`
-
 - [ ] **Step 4: Run it to verify it passes, and that the charger tests still do**
 
 Run: `.venv/bin/python -B -m unittest discover -s tests -p 'test_dashboard_web.py'` then `.venv/bin/python -B -m unittest discover -s tests -p 'test_charger_*.py'`
-Expected: the dashboard tests OK; the charger tests OK **except** `test_the_page_is_served` is still passing (the heading is unchanged until Task 7).
+Expected: both OK. (`test_the_page_is_served` still passes: the heading only changes in Task 6.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git branch --show-current   # must print feat/evsim-dashboard
 git add server/charger_web/dashboard.py server/charger_web/web.py server/charger_web/__main__.py \
-  server/tests/test_dashboard_web.py docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md
+  server/tests/test_dashboard_web.py
 git commit -m "Serve the dashboard data and start it with the charger page
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
@@ -1887,7 +1568,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: The page: power chain, chart and heading
+### Task 6: The page: power chain, chart and heading
 
 **Files:**
 - Modify: `server/charger_web/static/index.html` (overwritten)
@@ -2194,7 +1875,7 @@ Overwrite `server/charger_web/static/index.html`:
           <p class="eyebrow">Inverter</p>
           <h3>DC power, MPPT 1</h3>
           <div id="inverter-dc" class="chain-value">—</div>
-          <p class="description">Taken from the charger side, read over Modbus</p>
+          <p class="description">Taken from the charger side, as read by the setpoint server</p>
           <p id="inverter-updated" class="updated">Waiting for data</p>
         </article>
       </div>
@@ -2512,7 +2193,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Docs, the whole suite and the live check
+### Task 7: Docs, the whole suite and the live check
 
 **Files:**
 - Modify: `server/README.md`
@@ -2538,7 +2219,7 @@ with:
 ```
 A small page, run as a separate process from the MQTT averaging server, to read the AMTRON's current and set its
 limit over **Modbus TCP**. It also shows, read-only, the Fronius inverter's DC power, the board's `evsim/cp`, the
-setpoint topic and the server's DC target, with a 10-minute chart (see "The dashboard" below). It binds to
+setpoint topic and the server's DC target (all from MQTT), with a 10-minute chart (see "The dashboard" below). It binds to
 `127.0.0.1`, so it is available only on the development computer. It needs `paho-mqtt` (see `requirements.txt`).
 ```
 
@@ -2549,20 +2230,18 @@ Then insert, immediately before the line `## Test`, this section:
 
 The same page shows the whole chain. Nothing in it can write to the inverter or publish to MQTT.
 
-- **Inverter:** MPPT 1's DC power, read over Modbus TCP once a second from `192.168.21.120` (unit 1). Only SunSpec
-  model 160 is read. `EVSIM_INVERTER_HOST` changes the address. The inverter allows several Modbus clients; the
-  setpoint server's writer and this page can run together.
+- **Inverter:** MPPT 1's DC power is the `dc_w` field of `evsim/inverter`, which the setpoint server's inverter writer
+  publishes once a second. The page never connects to the inverter itself, so the DC power and the DC target appear
+  only while the setpoint server runs with `--inverter`.
 - **MQTT:** the page subscribes (client id `evsim-charger-web`) to `evsim/cp`, the setpoint topic and
-  `evsim/inverter`, on the broker at `127.0.0.1:1883`. `EVSIM_MQTT_HOST` changes the broker. The
-  `evsim/inverter` values (the DC target and the server's mode) exist only while the setpoint server runs with
-  `--inverter`. A retained message, such as `server_offline`, is shown as the last known state and flagged stale.
+  `evsim/inverter`, on the broker at `127.0.0.1:1883`. `EVSIM_MQTT_HOST` changes the broker. A retained message, such as `server_offline`, is shown as the last known state and flagged stale.
 - **The setpoint topic** is `evsim/setpoint`. Set `EVSIM_SETPOINT_TOPIC` (for example `evsim/electric_car`) to follow
   another topic. Its message must carry a numeric `setpoint_w`; `charger_web/parsers.py` (`parse_setpoint`) is the
   one place to change if the format differs. A `setpoint_w` outside 0 to 12 000 W is dropped, not clamped.
 - **The chart** keeps the last 10 minutes in memory (a restart empties it): the board's raw setpoint (the mean of the
   5 Hz samples in each second), the 1 s average, the DC target and the inverter's DC power. A value that is stale or
   missing leaves a gap. Click a legend entry to hide or show a line.
-- Each source fails alone: with the broker down the charger and inverter parts still work, and the reverse.
+- Each source fails alone: with the broker down the charger part still works, and the reverse.
 
 Design: `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md`.
 ```
@@ -2582,9 +2261,7 @@ metadata:
 The charger page became an EVSim dashboard on 2026-10-01 (spec `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md`,
 plan `docs/superpowers/plans/2026-10-01-evsim-dashboard.md`). Same process, same port (8080), still loopback only.
 
-- **Inverter:** `charger_web/inverter.py` reads SunSpec model 160 once a second (one request) and keeps MPPT 1's
-  `DCW` (the module whose id is 1). Only the DC power; no AC, no model 103, no writes. A second Modbus client next to
-  the setpoint server's writer.
+- **Inverter:** the page never touches it. The DC power is `dc_w` in the setpoint server's `evsim/inverter` message (MPPT 1, read by the server's writer once a second), so it exists only while the server runs with `--inverter`. A direct read-only Modbus reader was designed first and dropped (commit 2d4d134); it would be the way back if an independent view is needed.
 - **MQTT:** `charger_web/telemetry.py` subscribes (client id `evsim-charger-web`, never the setpoint server's id) to
   `evsim/cp`, the setpoint topic and `evsim/inverter`; parsers in `parsers.py`. Retained messages are shown stale.
 - **History:** `charger_web/history.py`, 600 frames at 1 Hz in memory; the chart is `static/chart.js`.
@@ -2609,9 +2286,9 @@ Append this line to `memory/MEMORY.md`:
 Run: `.venv/bin/python -B -m unittest discover -s tests`
 Expected: OK (the earlier 178 tests plus the new dashboard tests; about two minutes, the bench tests start their own Mosquitto).
 
-- [ ] **Step 4: The live check (read-only, real broker, real inverter)**
+- [ ] **Step 4: The live check (read-only, real broker)**
 
-Needs the lab: the Mosquitto broker, the board publishing, and ideally the setpoint server running with `--inverter 192.168.21.120` (it is the third Modbus client in the test below). The old page may already be running on port 8080; use 8081 for this check. The check writes nothing: the page only reads the charger and the inverter and never publishes.
+Needs the lab: the Mosquitto broker, the board publishing, and the setpoint server running with `--inverter 192.168.21.120` (the page takes the inverter's DC power from its `evsim/inverter` messages). The old page may already be running on port 8080; use 8081 for this check. The check writes nothing: the page reads the charger over Modbus and subscribes to MQTT, and never touches the inverter.
 
 ```bash
 cd server
@@ -2621,17 +2298,17 @@ sleep 15
 curl -s http://127.0.0.1:8081/api/telemetry | python3 -m json.tool
 ```
 
-Expected: `mqtt.connected` true; `board`, `setpoint` and `server` readings with `status` `ok`; `inverter.dc_w` `ok` with a value in watts.
+Expected: `mqtt.connected` true; `board`, `setpoint`, `server` and `inverter` readings with `status` `ok`; `inverter.dc_w` a value in watts.
 
-Compare with the server's own number, and add a third Modbus client at the same time (read-only):
+Compare with the message itself and, once, with the inverter (read-only):
 
 ```bash
 mosquitto_sub -h 127.0.0.1 -t evsim/inverter -C 1 -W 5
-.venv/bin/python ../tools/fronius_modbus.py status
 curl -s http://127.0.0.1:8081/api/telemetry | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['inverter']['dc_w'], d['server']['target_dc_w'])"
+.venv/bin/python ../tools/fronius_modbus.py status
 ```
 
-Expected: the page's `inverter.dc_w` agrees with `dc_w` in the `evsim/inverter` message and with the tool's MPPT 1 DC power, each within a few watts (they are read at slightly different moments); no errors in `/tmp/dashboard-live.log` while three clients are connected.
+Expected: the page's `inverter.dc_w` equals `dc_w` in the message (they are read a second apart, so within a few watts), and agrees within a few watts with MPPT 1's DC power from the tool. The tool is the one-time check that the number the writer publishes is the inverter's own.
 
 ```bash
 sleep 120
@@ -2640,7 +2317,7 @@ curl -s http://127.0.0.1:8081/api/history | python3 -c "import json,sys; d=json.
 
 Expected: about 130 frames, the last one with all four values numbers (or `cp_w` null if the board is silent).
 
-Open `http://127.0.0.1:8081/` in a browser and check: the charger section as before; three power-chain cards with values; four lines on the chart that follow each other (the DC power tracks the DC target within about 100 W); a legend click hides and shows a line; stopping the setpoint server (Ctrl-C) turns its cards stale within a few seconds and shows `server_offline`, and leaves a gap in the three lines it feeds. Restart the setpoint server afterwards if it was running.
+Open `http://127.0.0.1:8081/` in a browser and check: the charger section as before; three power-chain cards with values; four lines on the chart that follow each other (the DC power tracks the DC target within about 100 W); a legend click hides and shows a line; stopping the setpoint server (Ctrl-C) turns the setpoint, DC target and DC cards stale within a few seconds, shows `server_offline` for the setpoint, and leaves a gap in the three lines the server feeds (the board's raw line carries on). Restart the setpoint server afterwards if it was running.
 
 Then stop the check and record the result:
 
@@ -2648,7 +2325,7 @@ Then stop the check and record the result:
 kill "$(cat /tmp/dashboard-live.pid)"; rm /tmp/dashboard-live.pid
 ```
 
-Append a `## Live check, <date>` section to `memory/evsim-dashboard.md` with what was seen (agreement in watts, gaps, any error). If three Modbus clients caused any error on the inverter, say so there: it is the open risk in the spec.
+Append a `## Live check, <date>` section to `memory/evsim-dashboard.md` with what was seen (agreement in watts, gaps, any error).
 
 - [ ] **Step 5: Commit**
 
@@ -2668,17 +2345,17 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 | Spec requirement | Task |
 |---|---|
-| Inverter reader: model 160 only, one request a second, module id 1, scale factor with the value, 65535 is `None`, chain walked per connection, back-off, env host | 2 (settings in 1) |
-| Subscriber: own client id, async connect, subscribe in `on_connect`, QoS 0, no will, setpoint topic validation, parsers, retained handling | 1, 3, 4 |
-| Readings and staleness (3 s MQTT, 5 s inverter, forced stale) | 1, 2, 4 |
-| History: 600 frames, 1 Hz, mean of raw samples, gaps | 5 |
-| HTTP: `/api/telemetry`, `/api/history`, Host check, headers, unchanged charger routes | 6 |
-| Dashboard composition and start-up order (bind first, nothing started on a taken port) | 6 |
-| Page: heading, power-chain cards, chart with four lines, legend toggles, `textContent` only, gaps | 7 |
-| Error handling table (broker down, inverter down, server stopped, malformed, bad topic) | 2, 3, 4, 6 |
-| Testing list, including the live check with three clients | 2 to 8 |
-| README and notes | 8 |
+| Inverter DC power from `evsim/inverter` (`dc_w`, 0 to 30 000 W, a bad value is `None` and the message is kept); no direct Modbus reader | 1, 2, 3 |
+| Subscriber: own client id, async connect, subscribe in `on_connect`, QoS 0, no will, setpoint topic validation, parsers, retained handling | 1, 2, 3 |
+| Readings and staleness (3 s for every MQTT value, forced stale) | 1, 3 |
+| History: 600 frames, 1 Hz, mean of raw samples, gaps | 4 |
+| HTTP: `/api/telemetry`, `/api/history`, Host check, headers, unchanged charger routes | 5 |
+| Dashboard composition and start-up order (bind first, nothing started on a taken port) | 5 |
+| Page: heading, power-chain cards, chart with four lines, legend toggles, `textContent` only, gaps | 6 |
+| Error handling table (broker down, inverter down, server stopped, malformed, bad topic) | 2, 3, 5 |
+| Testing list, including the live check | 1 to 7 |
+| README and notes | 7 |
 
 **Placeholder scan.** No TBD or "similar to" steps; every code step holds the code.
 
-**Type consistency.** `reading()` is `(value, at, now, stale_after, force_stale, wall)` in Tasks 1, 2 and 4; `InverterReader.reading()` and `Telemetry.snapshot()` produce that shape, which `History` (Task 5) reads through `["status"]` and `["value"]`; `Dashboard.telemetry()` adds `"inverter": {"dc_w": ...}`, which `dashboard.js` reads as `data.inverter.dc_w`. Field names `cp_w`, `setpoint_w`, `target_dc_w`, `dc_w` are the same in `history.py`, `chart.js`, `dashboard.js` and the page's `data-series`.
+**Type consistency.** `reading()` is `(value, at, now, stale_after, force_stale, wall)` in Tasks 1 and 3; `Telemetry.snapshot()` produces that shape for every value, including `inverter.dc_w` (from the same `evsim/inverter` message as `server.target_dc_w`), which `History` (Task 4) reads through `["status"]` and `["value"]` and `Dashboard.telemetry()` (Task 5) passes on unchanged to `dashboard.js`, which reads `data.inverter.dc_w`. `parse_inverter` (Task 2) returns the `dc_w` key that `Telemetry` (Task 3) looks up. Field names `cp_w`, `setpoint_w`, `target_dc_w`, `dc_w` are the same in `history.py`, `chart.js`, `dashboard.js` and the page's `data-series`.

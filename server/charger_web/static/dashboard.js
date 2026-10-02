@@ -20,10 +20,14 @@ function ageText(reading) {
   return `${stale ? "Stale · last updated" : "Updated"} ${time}`;
 }
 
+function readingStatus(reading) {
+  return reading ? reading.status : "unavailable";
+}
+
 function showWatts(valueId, reading, updatedId) {
   const target = byId(valueId);
   target.textContent = formatWatts(reading && reading.value);
-  target.dataset.status = reading ? reading.status : "unavailable";
+  target.dataset.status = readingStatus(reading);
   if (updatedId) byId(updatedId).textContent = ageText(reading);
 }
 
@@ -36,6 +40,7 @@ function renderTelemetry(data) {
   const board = data.board || {};
   showWatts("board-setpoint", board.setpoint_w, "board-updated");
   byId("board-detail").textContent = `${board.status || "no status"} · pilot ${board.state || "—"}`;
+  byId("board-detail").dataset.status = readingStatus(board.setpoint_w);
 
   const setpoint = data.setpoint || {};
   const topic = setpoint.topic || "—";
@@ -46,6 +51,7 @@ function renderTelemetry(data) {
   const server = data.server || {};
   showWatts("target-value", server.target_dc_w);
   byId("server-detail").textContent = `${setpoint.status || "no status"} · server ${server.mode || "mode unknown"}`;
+  byId("server-detail").dataset.status = readingStatus(setpoint.setpoint_w);
 
   showWatts("inverter-dc", data.inverter && data.inverter.dc_w, "inverter-updated");
 }

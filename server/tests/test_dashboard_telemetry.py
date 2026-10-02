@@ -134,6 +134,19 @@ class TelemetryTest(unittest.TestCase):
         snap = self.snapshot()["setpoint"]
         self.assertEqual((snap["setpoint_w"]["status"], snap["status"]), ("ok", "ok"))
 
+    def test_a_live_server_offline_message_is_stale_not_a_fresh_zero(self):
+        self.client.deliver("evsim/setpoint", SETPOINT)
+        self.client.deliver("evsim/setpoint", OFFLINE)          # not retained: a connected subscriber gets it live
+        snap = self.snapshot()["setpoint"]
+        self.assertEqual((snap["setpoint_w"]["value"], snap["setpoint_w"]["status"], snap["status"]),
+                         (0.0, "stale", "server_offline"))
+
+    def test_a_live_message_after_server_offline_is_fresh_again(self):
+        self.client.deliver("evsim/setpoint", OFFLINE)
+        self.client.deliver("evsim/setpoint", SETPOINT)
+        snap = self.snapshot()["setpoint"]
+        self.assertEqual((snap["setpoint_w"]["status"], snap["status"]), ("ok", "ok"))
+
     def test_raw_samples_are_drained_once_and_never_include_retained_ones(self):
         self.client.deliver("evsim/cp", CP, retain=True)
         for watts in (4300, 4350, 4400):

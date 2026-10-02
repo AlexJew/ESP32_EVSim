@@ -39,7 +39,7 @@ class Telemetry:
         }
         self._lock = threading.Lock()
         self._connected = False
-        self._latest = {}               # kind -> {"data": parsed dict, "at": receive time, "retained": bool}
+        self._latest = {}               # kind -> {"data": parsed dict, "at": receive time, "retained": bool (shown stale)}
         self._cp_samples = []           # raw evsim/cp setpoint_w values since the last drain
         client.on_connect = self._on_connect
         client.on_message = self._on_message
@@ -72,13 +72,16 @@ class Telemetry:
             log.warning("dropping unusable %s message: %r", msg.topic, bytes(msg.payload[:80]))
             return
         retained = bool(msg.retain)
+        # The setpoint server's last word is "I am gone". A connected subscriber gets it live, not retained, but
+        # it is the last known state all the same: whatever setpoint it carries, it is no longer a fresh value.
+        gone = kind == "setpoint" and data.get("status") == "server_offline"
         now = self._clock()
         with self._lock:
             current = self._latest.get(kind)
             if retained and current is not None and not current["retained"] \
                     and now - current["at"] < config.MQTT_STALE_AFTER_S:
                 return                  # a retained copy never replaces a fresh live value
-            self._latest[kind] = {"data": data, "at": now, "retained": retained}
+            self._latest[kind] = {"data": data, "at": now, "retained": retained or gone}
             if kind == "cp" and not retained:
                 self._cp_samples.append(data["setpoint_w"])
 

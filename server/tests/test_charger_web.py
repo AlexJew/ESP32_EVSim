@@ -88,7 +88,7 @@ class WebTest(unittest.TestCase):
     def test_the_page_is_served(self):
         status, body = self.request("GET", "/")
         self.assertEqual(status, 200)
-        self.assertIn(b"AMTRON charger", body)
+        self.assertIn(b"<h1>EVSim</h1>", body)
 
     def test_only_loopback_is_allowed(self):
         with self.assertRaises(ValueError):

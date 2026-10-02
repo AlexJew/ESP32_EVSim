@@ -28,8 +28,9 @@ Watch the output:
 ## Local AMTRON charger page
 
 A small page, run as a separate process from the MQTT averaging server, to read the AMTRON's current and set its
-limit over **Modbus TCP**. It uses only the Python standard library and binds to `127.0.0.1`, so it is available
-only on the development computer.
+limit over **Modbus TCP**. It also shows, read-only, the Fronius inverter's DC power, the board's `evsim/cp`, the
+setpoint topic and the server's DC target (all from MQTT), with a 10-minute chart (see "The dashboard" below). It binds to
+`127.0.0.1`, so it is available only on the development computer. It needs `paho-mqtt` (see `requirements.txt`).
 
 Enable the charger's Modbus server once, in the AMTRON web config: "Modbus TCP Server for energy management
 systems" On, base port 502, register address set MENNEKES, "Allow Start/Stop Transaction" Off. Set the operator
@@ -57,6 +58,25 @@ How it works, and what to know:
 
 Design: `docs/superpowers/specs/2026-10-01-charger-modbus-backend-design.md`. The read-only scanner
 `tools/amtron_modbus_probe.py` lists registers (any read can resume charging after a fallback).
+
+### The dashboard
+
+The same page shows the whole chain. Nothing in it can write to the inverter or publish to MQTT.
+
+- **Inverter:** MPPT 1's DC power is the `dc_w` field of `evsim/inverter`, which the setpoint server's inverter writer
+  publishes once a second. The page never connects to the inverter itself, so the DC power and the DC target appear
+  only while the setpoint server runs with `--inverter`.
+- **MQTT:** the page subscribes (client id `evsim-charger-web`) to `evsim/cp`, the setpoint topic and
+  `evsim/inverter`, on the broker at `127.0.0.1:1883`. `EVSIM_MQTT_HOST` changes the broker. A retained message, such as `server_offline`, is shown as the last known state and flagged stale.
+- **The setpoint topic** is `evsim/setpoint`. Set `EVSIM_SETPOINT_TOPIC` (for example `evsim/electric_car`) to follow
+  another topic. Its message must carry a numeric `setpoint_w`; `charger_web/parsers.py` (`parse_setpoint`) is the
+  one place to change if the format differs. A `setpoint_w` outside 0 to 12 000 W is dropped, not clamped.
+- **The chart** keeps the last 10 minutes in memory (a restart empties it): the board's raw setpoint (the mean of the
+  5 Hz samples in each second), the 1 s average, the DC target and the inverter's DC power. A value that is stale or
+  missing leaves a gap. Click a legend entry to hide or show a line.
+- Each source fails alone: with the broker down the charger part still works, and the reverse.
+
+Design: `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md`.
 
 ## Test
 

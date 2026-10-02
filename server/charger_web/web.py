@@ -21,7 +21,7 @@ class _LocalHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
-def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
+def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT, dashboard=None):
     if host != DEFAULT_WEB_HOST:
         raise ValueError("The charger page must bind to 127.0.0.1.")
     client = charger or ChargerService()
@@ -55,6 +55,15 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
         def _json(self, code, body):
             self._send(code, json.dumps(body, separators=(",", ":"), allow_nan=False))
 
+        def _dashboard_json(self, produce):
+            try:
+                data = json.dumps(produce(), separators=(",", ":"), allow_nan=False)
+            except Exception:
+                log.exception("dashboard data failed")
+                self._json(500, {"error": "Dashboard data is unavailable."})
+                return
+            self._send(200, data)
+
         def do_GET(self):
             if not self._host_matches():
                 self._json(400, {"error": "Use the local http://127.0.0.1 URL."})
@@ -63,9 +72,17 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT):
             if path == "/api/charger/status":
                 self._json(200, client.status())
                 return
+            if dashboard is not None and path == "/api/telemetry":
+                self._dashboard_json(dashboard.telemetry)
+                return
+            if dashboard is not None and path == "/api/history":
+                self._dashboard_json(dashboard.history)
+                return
             asset = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/chart.js": ("chart.js", "text/javascript; charset=utf-8"),
+                "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
             }.get(path)
             if asset is None:

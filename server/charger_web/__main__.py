@@ -1,10 +1,11 @@
-"""Run the independent AMTRON charger web interface (Modbus TCP)."""
+"""Run the local EVSim page: the AMTRON charger over Modbus TCP, plus the read-only dashboard."""
 
 import argparse
 import logging
 from http.server import ThreadingHTTPServer
 
 from .config import DEFAULT_WEB_HOST, DEFAULT_WEB_PORT
+from .dashboard import build_dashboard
 from .service import ChargerService
 from .web import create_server
 
@@ -22,7 +23,8 @@ def _port(value):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="python -m charger_web",
-        description="Serve the local AMTRON charger page over Modbus TCP, without starting the MQTT setpoint server.",
+        description="Serve the local EVSim page: the AMTRON charger over Modbus TCP (read and set its current) and, "
+                    "read-only, the inverter's DC power and the MQTT telemetry. It does not start the setpoint server.",
     )
     parser.add_argument("--host", default=DEFAULT_WEB_HOST, help="must be 127.0.0.1")
     parser.add_argument("--port", type=_port, default=DEFAULT_WEB_PORT, help="local page port (default %(default)s)")
@@ -34,13 +36,16 @@ def main(argv=None):
     log = logging.getLogger("charger_web")
     server: ThreadingHTTPServer | None = None
     service = None
+    dashboard = None
     try:
         try:
             service = ChargerService()
+            dashboard = build_dashboard()
         except ValueError as exc:
             parser.error(str(exc))
-        server = create_server(charger=service, host=args.host, port=args.port)   # bind first: a taken port must not start a poll
+        server = create_server(charger=service, dashboard=dashboard, host=args.host, port=args.port)   # bind first: a taken port must not start a poll
         service.start()          # the background poller is also the charger's heartbeat
+        dashboard.start()
         log.info("charger page listening at http://127.0.0.1:%d/", args.port)
         server.serve_forever()
     except KeyboardInterrupt:
@@ -48,6 +53,8 @@ def main(argv=None):
     finally:
         if server is not None:
             server.server_close()
+        if dashboard is not None:
+            dashboard.stop()
         if service is not None:
             service.stop()
     return 0

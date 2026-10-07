@@ -41,10 +41,12 @@ class Dashboard:
             self._client.loop_stop()
 
 
-def build_dashboard():
-    """The real dashboard from the environment. Raises ValueError for a bad setting; starts nothing."""
+def build_dashboard(charger=None):
+    """The real dashboard from the environment. Raises ValueError for a bad setting; starts nothing.
+
+    `charger` is the charger service: the history reads its cached status for the meter values."""
     mqtt_host, topic = config.mqtt_host(), config.setpoint_topic()
     client = build_client()
     telemetry = Telemetry(client, topic)
-    history = History(telemetry)
+    history = History(telemetry, charger)
     return Dashboard(telemetry, history, client, (mqtt_host, config.MQTT_PORT))

@@ -28,6 +28,7 @@ const dashboardState = {
   unit: "W",
   visible: new Set([...POWER_SERIES, ...CURRENT_SERIES, ...VOLT_SERIES].map((series) => series.id)),
   busy: { telemetry: false, history: false },
+  zoom: null,                // null follows live; otherwise the zoomed window {from, to}, frozen on absolute times
   parts: loadParts(),        // the bubbles that are on; all three can be off
   measurements: {},          // row -> {amps, volts, watts, reading}: kept so a bubble redraws the rows at once
   stateBusy: false,          // a vehicle-state command is in flight: the poll must not move or enable the dropdown
@@ -182,8 +183,18 @@ function updateChartNote() {
   byId("chart-note").textContent = `${dashboardState.frames.length} s of history · updated ${new Date().toLocaleTimeString()}`;
 }
 
+function currentRange(nowS) {
+  return dashboardState.zoom ? clampView(dashboardState.zoom, nowS) : { from: nowS - WINDOW_S, to: nowS };
+}
+
 function redrawChart() {
-  drawChart(byId("chart"), dashboardState.frames, dashboardState.visible, Date.now() / 1000, currentView());
+  const nowS = Date.now() / 1000;
+  drawChart(byId("chart"), dashboardState.frames, dashboardState.visible, nowS, currentView(), dashboardState.zoom);
+  const zoomed = dashboardState.zoom !== null;
+  const range = currentRange(nowS);
+  byId("chart-live").hidden = !zoomed;
+  byId("chart-view").hidden = !zoomed;
+  byId("chart-view").textContent = zoomed ? `Showing ${Math.round(range.to - range.from)} s` : "";
 }
 
 function renderHistory(data) {
@@ -230,6 +241,50 @@ byId("chart-unit").addEventListener("change", (event) => {
   redrawChart();
 });
 window.addEventListener("resize", redrawChart);
+
+// Zoom the time axis with the wheel or a pinch (a pinch arrives as a wheel event with ctrlKey), pan by dragging, go back
+// to live with a double-click or the button. A zoomed window is frozen on absolute times, so new data does not slide it.
+const chartCanvas = byId("chart");
+let drag = null;
+
+function plotFraction(event) {
+  const rect = chartCanvas.getBoundingClientRect();
+  const fraction = (event.clientX - rect.left - PLOT.left) / (rect.width - PLOT.left - PLOT.right);
+  return Math.min(1, Math.max(0, fraction));
+}
+
+function followLive() {
+  dashboardState.zoom = null;
+  redrawChart();
+}
+
+chartCanvas.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const nowS = Date.now() / 1000;
+  const range = currentRange(nowS);
+  const anchor = range.from + plotFraction(event) * (range.to - range.from);
+  const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+  const factor = Math.min(2, Math.max(0.5, Math.exp(delta * (event.ctrlKey ? 0.01 : 0.0015))));
+  dashboardState.zoom = zoomView(dashboardState.zoom, anchor, factor, nowS);
+  redrawChart();
+}, { passive: false });
+chartCanvas.addEventListener("pointerdown", (event) => {
+  if (dashboardState.zoom === null) return;               // the whole window is shown: nothing to pan
+  drag = { x: event.clientX, range: currentRange(Date.now() / 1000) };
+  if (chartCanvas.setPointerCapture) chartCanvas.setPointerCapture(event.pointerId);
+});
+chartCanvas.addEventListener("pointermove", (event) => {
+  if (drag === null) return;
+  const rect = chartCanvas.getBoundingClientRect();
+  const secondsPerPixel = (drag.range.to - drag.range.from) / (rect.width - PLOT.left - PLOT.right);
+  dashboardState.zoom = panView(drag.range, -(event.clientX - drag.x) * secondsPerPixel, Date.now() / 1000);
+  redrawChart();
+});
+chartCanvas.addEventListener("pointerup", () => { drag = null; });
+chartCanvas.addEventListener("pointercancel", () => { drag = null; });
+chartCanvas.addEventListener("dblclick", followLive);
+byId("chart-live").addEventListener("click", followLive);
+
 for (const part of PARTS) {
   const bubble = byId("part-" + part);
   bubble.setAttribute("aria-pressed", String(dashboardState.parts.has(part)));

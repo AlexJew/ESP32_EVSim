@@ -134,3 +134,8 @@ footer { align-items: center; color: var(--muted); font-size: .79rem; margin-top
 .list-heading { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .chips { display: flex; gap: 6px; }
 .legend-item.chip { font-size: .8rem; min-height: 32px; padding: 4px 12px; }
+
+/* Zooming the chart: nothing shows until it is zoomed, then the span and a "Back to live" button sit under the note. */
+.chart-status { align-items: flex-end; display: flex; flex-direction: column; gap: 4px; }
+.chart-status [hidden] { display: none; }
+#chart { touch-action: none; user-select: none; }

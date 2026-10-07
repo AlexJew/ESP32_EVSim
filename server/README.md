@@ -75,6 +75,9 @@ The same page shows the whole chain. It never writes to the inverter. Its only M
 - **The chart** keeps the last 10 minutes in memory (a restart empties it): the board's raw setpoint (the mean of the
   5 Hz samples in each second), the 1 s average, the DC target and the inverter's DC power. A value that is stale or
   missing leaves a gap. Click a legend entry to hide or show a line.
+  Scroll or pinch over the chart to zoom along the time axis (down to 20 s, around the cursor), drag to pan, double-click or
+  "Back to live" to follow the latest data again; a zoomed view stays where you put it, shows clock times and a marker on
+  each 1 s frame when narrow. Frames are 1 s apart, so delays can be read to about 1 s.
 - **Measurements:** the Car charger, DC input and AC output rows each read "current / voltage / power". The
   **A**, **V** and **W** bubbles in the card's header switch each part on or off for all three rows (all three may be off; the
   choice is kept in the browser). Amps always show one decimal. The charger's

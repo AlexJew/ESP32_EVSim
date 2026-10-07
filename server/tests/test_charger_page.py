@@ -116,6 +116,15 @@ class PageTest(unittest.TestCase):
         self.assertIn('id="chart-title"', html)                          # the section keeps its (hidden) accessible name
         self.assertIn("ten minutes", html)                               # and the canvas description still says it
 
+    def test_the_zoom_adds_no_visible_element_to_the_page_until_it_is_used(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        for needed in ("chart-live", "chart-view"):
+            tag = [attrs for t, attrs in parsed_page().tags if attrs.get("id") == needed][0]
+            self.assertIn("hidden", tag)                                       # nothing shows until the chart is zoomed
+        canvas = [attrs for t, attrs in parsed_page().tags if attrs.get("id") == "chart"][0]
+        self.assertIn("zoom", canvas.get("title", ""))                         # the usage hint is a tooltip, not a new line
+        self.assertNotIn("Scroll or pinch over the chart", html)
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')
@@ -188,6 +197,37 @@ class PageTest(unittest.TestCase):
             node_json("[c.axisAmps(0), c.axisAmps(11.8), c.axisAmps(16), c.axisAmps(17.1)]"),
             [{"top": 16, "step": 4}] * 3 + [{"top": 20, "step": 4}],
         )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_zooming_keeps_the_time_under_the_cursor_fixed(self):
+        # whole window [400, 1000]; the cursor is at 700, the middle; half the span leaves 700 in the middle
+        self.assertEqual(node_json("c.zoomView(null, 700, 0.5, 1000)"), {"from": 550, "to": 850})
+        self.assertEqual(node_json("c.zoomView(null, 1000, 0.5, 1000)"), {"from": 700, "to": 1000})   # the live edge stays put
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_zoom_stops_at_20_seconds_and_returns_to_live_at_the_full_window(self):
+        view = node_json("c.zoomView(null, 700, 0.0001, 1000)")
+        self.assertEqual(view["to"] - view["from"], 20)
+        self.assertIsNone(node_json("c.zoomView({from: 550, to: 850}, 700, 4, 1000)"))
+        self.assertIsNone(node_json("c.zoomView(null, 700, 3, 1000)"))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_panning_keeps_the_window_inside_the_history(self):
+        self.assertEqual(node_json("c.panView({from: 550, to: 850}, 100, 1000)"), {"from": 650, "to": 950})
+        self.assertEqual(node_json("c.panView({from: 550, to: 850}, 1000, 1000)"), {"from": 700, "to": 1000})
+        self.assertEqual(node_json("c.panView({from: 550, to: 850}, -1000, 1000)"), {"from": 400, "to": 700})
+        self.assertIsNone(node_json("c.panView(null, 50, 1000)"))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_frozen_view_that_has_scrolled_out_of_the_history_is_pinned_to_its_oldest_edge(self):
+        self.assertEqual(node_json("c.clampView({from: 100, to: 200}, 1000)"), {"from": 400, "to": 500})
+        self.assertEqual(node_json("c.clampView({from: 990, to: 1010}, 1000)"), {"from": 980, "to": 1000})
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_zoomed_time_axis_uses_round_steps_for_the_span(self):
+        self.assertEqual(node_json("c.timeTicks(400, 1000)"), {"step": 120, "ticks": [480, 600, 720, 840, 960]})
+        self.assertEqual(node_json("c.timeTicks(980, 1000)"), {"step": 5, "ticks": [980, 985, 990, 995, 1000]})
+        self.assertEqual(node_json("c.timeTicks(940, 1000)")["step"], 10)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_the_voltage_axis_steps_by_100_volts_and_never_goes_below_300(self):

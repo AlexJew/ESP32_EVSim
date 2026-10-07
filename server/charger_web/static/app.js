@@ -87,8 +87,7 @@ function applyStatus(status) {
   signalledCell.textContent = formatAmpsValue(signalled.value);
   signalledCell.dataset.status = signalled.status;
   const chargerCell = el("meter-charger");
-  chargerCell.textContent = formatTriple(meanOf(meter.value), meanOf(voltage.value), power.value);
-  chargerCell.dataset.status = power.status;
+  setMeasurement("charger", meanOf(meter.value), meanOf(voltage.value), power.value, power);
   chargerCell.title = "Current and voltage: mean of the three phases";
 
   const setLimit = status.set_limit_a || empty;

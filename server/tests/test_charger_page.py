@@ -100,6 +100,16 @@ class PageTest(unittest.TestCase):
         classes = [attrs.get("class") for tag, attrs in parsed_page().tags if tag == "select"]
         self.assertEqual(classes, ["unit-select", "unit-select"])                     # the state and the chart dropdowns
 
+    def test_the_measurements_card_has_three_toggle_bubbles_a_v_w(self):
+        buttons = {attrs["id"]: attrs for tag, attrs in parsed_page().tags if tag == "button" and attrs.get("id", "").startswith("part-")}
+        self.assertEqual(sorted(buttons), ["part-A", "part-V", "part-W"])
+        for attrs in buttons.values():
+            self.assertEqual((attrs["type"], attrs["aria-pressed"]), ("button", "true"))
+            self.assertIn("aria-label", attrs)
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('id="measurements-title"'), html.index('id="part-A"'))
+        self.assertLess(html.index('id="part-W"'), html.index('id="meter-charger"'))
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')

@@ -15,19 +15,28 @@ const fs = require("fs");
 const { installDom } = require(process.argv[3]);
 const { elements, document } = installDom();
 global.fetch = () => Promise.reject(new Error("no network in this test"));
+const scenarioIn = JSON.parse(process.argv[2]);
+const writes = [];
+if (scenarioIn.storage === "throw") {
+  global.localStorage = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
+} else if (scenarioIn.storage !== "absent") {
+  const memory = { ...(scenarioIn.storage || {}) };
+  global.localStorage = { getItem: (key) => (key in memory ? memory[key] : null), setItem(key, value) { memory[key] = value; writes.push([key, value]); } };
+}
 const code = ["chart.js", "dashboard.js"].map((name) => fs.readFileSync(process.argv[1] + "/" + name, "utf8")).join("\n");
 eval(code + "\nglobalThis.page = { renderTelemetry, renderHistory };");
-const scenario = JSON.parse(process.argv[2]);
+const scenario = scenarioIn;
 if (scenario.telemetry) page.renderTelemetry(scenario.telemetry);
 for (const [kind, a] of scenario.steps || []) {
   if (kind === "unit") document.getElementById("chart-unit").listeners.change({ target: { value: a } });
   if (kind === "legend") document.getElementById("legend").children.find((btn) => btn.children[1].textContent === a).listeners.click();
   if (kind === "history") page.renderHistory({ frames: a });
+  if (kind === "part") document.getElementById("part-" + a).listeners.click();
 }
-const out = { elements: {}, legend: [] };
+const out = { elements: {}, legend: [], writes };
 for (const [id, el] of Object.entries(elements)) {
   out.elements[id] = { text: el.textContent, status: el.dataset.status || null, state: el.dataset.state || null,
-                       title: el.title, value: el.value, disabled: el.disabled === true };
+                       title: el.title, value: el.value, disabled: el.disabled === true, pressed: el.attrs["aria-pressed"] };
 }
 for (const btn of document.getElementById("legend").children) {
   out.legend.push({ label: btn.children[1].textContent, pressed: btn.attrs["aria-pressed"], noData: btn.classes.has("no-data") });
@@ -56,8 +65,8 @@ def telemetry(board="ok", setpoint="ok", inverter="ok", connected=True, state="C
     }
 
 
-def run(telemetry_data=None, *steps):
-    scenario = {"telemetry": telemetry_data, "steps": list(steps)}
+def run(telemetry_data=None, *steps, storage=None):
+    scenario = {"telemetry": telemetry_data, "steps": list(steps), "storage": storage}
     result = subprocess.run(["node", "-e", HARNESS, str(STATIC), json.dumps(scenario), str(HERE / "dom_stub.js")],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -151,6 +160,76 @@ class RenderTest(unittest.TestCase):
         frames = [{"t": 1, "cp_w": 5000, "setpoint_w": 5000, "dc_w": 5000}]
         out = run(None, ("history", frames), ("unit", "A"))
         self.assertEqual(set(by_label(out, "noData").values()), {True})
+
+    def test_amps_in_the_measurements_always_show_one_decimal(self):
+        values = {"dc_w": 7750.0, "dc_a": 15.0, "dc_v": 515.0, "ac_w": 7509.0, "ac_a": 10.0, "ac_v": 233.0}
+        out = run(telemetry(values=values))["elements"]
+        self.assertEqual(out["inverter-dc"]["text"], "15.0 A / 515 V / 7750 W")
+        self.assertEqual(out["inverter-ac"]["text"], "10.0 A / 233 V / 7509 W")
+
+    def test_the_three_bubbles_start_pressed(self):
+        out = run(telemetry())
+        for part in "AVW":
+            self.assertEqual(out["elements"]["part-" + part]["pressed"], "true", part)
+
+    def test_a_bubble_takes_its_value_and_its_slash_out_of_every_row(self):
+        values = {"dc_w": 7750.0, "dc_a": 15.1, "dc_v": 515.0, "ac_w": 7509.0, "ac_a": 10.7, "ac_v": 233.0}
+        for part, dc, ac in (("A", "515 V / 7750 W", "233 V / 7509 W"),
+                             ("V", "15.1 A / 7750 W", "10.7 A / 7509 W"),
+                             ("W", "15.1 A / 515 V", "10.7 A / 233 V")):
+            out = run(telemetry(values=values), ("part", part))
+            self.assertEqual((out["elements"]["inverter-dc"]["text"], out["elements"]["inverter-ac"]["text"]), (dc, ac), part)
+            self.assertEqual(out["elements"]["part-" + part]["pressed"], "false")
+
+    def test_with_two_bubbles_off_there_is_one_value_and_no_slash(self):
+        out = run(telemetry(), ("part", "A"), ("part", "V"))["elements"]
+        self.assertEqual((out["inverter-dc"]["text"], out["inverter-ac"]["text"]), ("5662 W", "5500 W"))
+
+    def test_all_three_can_be_off_and_then_the_rows_are_empty(self):
+        out = run(telemetry(), ("part", "A"), ("part", "V"), ("part", "W"))["elements"]
+        for row in ("inverter-dc", "inverter-ac"):
+            self.assertEqual(out[row]["text"], "", row)
+        for part in "AVW":
+            self.assertEqual(out["part-" + part]["pressed"], "false")
+
+    def test_a_bubble_clicked_again_brings_its_value_back_in_the_same_place(self):
+        out = run(telemetry(), ("part", "V"), ("part", "V"))["elements"]
+        self.assertEqual(out["inverter-dc"]["text"], "10.9 A / 520 V / 5662 W")
+
+    def test_the_rows_change_at_once_without_waiting_for_the_next_poll(self):
+        out = run(telemetry(), ("part", "W"))["elements"]
+        self.assertEqual(out["inverter-ac"]["text"], "8.1 A / 233 V")
+
+    def test_a_value_that_is_not_available_is_a_dash_while_its_bubble_is_on_and_gone_when_off(self):
+        values = {"dc_w": 5661.8, "dc_v": 520.4, "ac_w": 5500.2, "ac_v": 233.3}          # no currents
+        self.assertEqual(run(telemetry(values=values))["elements"]["inverter-dc"]["text"], "— / 520 V / 5662 W")
+        self.assertEqual(run(telemetry(values=values), ("part", "V"))["elements"]["inverter-dc"]["text"], "— / 5662 W")
+        self.assertEqual(run(telemetry(values=values), ("part", "A"))["elements"]["inverter-dc"]["text"], "520 V / 5662 W")
+
+    def test_dimming_does_not_depend_on_the_bubbles(self):
+        out = run(telemetry(inverter="stale"), ("part", "A"))["elements"]
+        self.assertEqual((out["inverter-dc"]["status"], out["inverter-dc"]["text"]), ("stale", "520 V / 5662 W"))
+
+    def test_the_choice_is_saved_and_comes_back_after_a_reload(self):
+        out = run(telemetry(), ("part", "V"))
+        self.assertEqual(out["writes"][-1], ["evsim.measurement-parts", '["A","W"]'])
+        reloaded = run(telemetry(), storage={"evsim.measurement-parts": '["W"]'})
+        self.assertEqual(reloaded["elements"]["inverter-dc"]["text"], "5662 W")
+        self.assertEqual([reloaded["elements"]["part-" + p]["pressed"] for p in "AVW"], ["false", "false", "true"])
+
+    def test_everything_off_is_a_valid_saved_choice(self):
+        reloaded = run(telemetry(), storage={"evsim.measurement-parts": "[]"})
+        self.assertEqual(reloaded["elements"]["inverter-dc"]["text"], "")
+
+    def test_unreadable_saved_choices_fall_back_to_showing_everything(self):
+        for junk in ("not json", "[1, 2]", '["X"]', '"A"', "{}", "null"):
+            out = run(telemetry(), storage={"evsim.measurement-parts": junk})
+            self.assertEqual(out["elements"]["inverter-dc"]["text"], "10.9 A / 520 V / 5662 W", junk)
+
+    def test_blocked_or_missing_storage_does_not_break_the_page_or_the_bubbles(self):
+        for storage in ("throw", "absent"):
+            out = run(telemetry(), ("part", "V"), storage=storage)
+            self.assertEqual(out["elements"]["inverter-dc"]["text"], "10.9 A / 5662 W", storage)
 
     def test_the_dropdown_follows_the_board_and_is_off_when_the_state_is_unknown(self):
         for state, value, disabled in (("C", "C", False), ("A", "A", False), (None, "", True), ("X", "", True)):

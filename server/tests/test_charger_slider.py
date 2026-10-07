@@ -53,6 +53,7 @@ const snapshot = () => {
     if (kind === "input") { slider.value = String(value); slider.listeners.input(); }
     if (kind === "change") slider.listeners.change();
     if (kind === "poll") document.getElementById("refresh").listeners.click();
+    if (kind === "part") document.getElementById("part-" + value).listeners.click();
     if (kind === "wait") await wait(value);
     log.push(snapshot());
   }
@@ -104,6 +105,12 @@ class SliderTest(unittest.TestCase):
         self.assertEqual((first["signalled"], first["charger"]), ("10 A", "11.8 A / 232 V / 600 W"))   # means of the phases
         self.assertEqual(first["installation"], "Installation limit: 16 A")
         self.assertEqual(first["posts"], [])
+
+    def test_the_car_charger_row_follows_the_bubbles_and_keeps_them_across_a_poll(self):
+        log = run([("part", "W"), ("poll", None), ("wait", 40), ("part", "A"), ("part", "V"), ("wait", 10)])
+        self.assertEqual(log[0]["charger"], "11.8 A / 232 V / 600 W")
+        self.assertEqual(log[3]["charger"], "11.8 A / 232 V")                # after W off and a poll
+        self.assertEqual(log[-1]["charger"], "")                              # all three off
 
     def test_a_stale_signalled_current_keeps_its_value_dimmed_instead_of_a_dash(self):
         stale = status_with(signalled_current_a={"value": 10, "status": "stale", "updated_at": None})

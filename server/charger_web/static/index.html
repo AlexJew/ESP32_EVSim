@@ -95,7 +95,14 @@
         </section>
 
         <section class="panel list-panel" aria-labelledby="measurements-title">
-          <h2 id="measurements-title">Measurements</h2>
+          <div class="list-heading">
+            <h2 id="measurements-title">Measurements</h2>
+            <div class="chips" role="group" aria-label="Values shown">
+              <button type="button" id="part-A" class="legend-item chip" aria-pressed="true" aria-label="Current (A)">A</button>
+              <button type="button" id="part-V" class="legend-item chip" aria-pressed="true" aria-label="Voltage (V)">V</button>
+              <button type="button" id="part-W" class="legend-item chip" aria-pressed="true" aria-label="Power (W)">W</button>
+            </div>
+          </div>
           <dl class="rows">
             <div class="row"><dt>Car charger</dt><dd id="meter-charger">—</dd></div>
             <div class="row"><dt>DC input</dt><dd id="inverter-dc">—</dd></div>

@@ -1,11 +1,35 @@
 // The setpoints, the measurements and the chart: polls /api/telemetry every second and /api/history every two.
 // All three charts (power, current, voltage) draw the server's 10-minute history.
 const byId = (id) => document.getElementById(id);
+const PARTS = ["A", "V", "W"];                           // the bubbles of the Measurements card, in display order
+const PART_KEY = "evsim.measurement-parts";
+
+// Which parts of a measurement are shown: the saved choice, or all three. A blocked or unreadable store means all three.
+function loadParts() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PART_KEY));
+    if (Array.isArray(stored) && stored.every((part) => PARTS.includes(part))) return new Set(stored);
+  } catch (error) {
+    // no storage: show everything
+  }
+  return new Set(PARTS);
+}
+
+function saveParts() {
+  try {
+    localStorage.setItem(PART_KEY, JSON.stringify(PARTS.filter((part) => dashboardState.parts.has(part))));
+  } catch (error) {
+    // blocked: the choice simply does not survive a reload
+  }
+}
+
 const dashboardState = {
   frames: [],
   unit: "W",
   visible: new Set([...POWER_SERIES, ...CURRENT_SERIES, ...VOLT_SERIES].map((series) => series.id)),
   busy: { telemetry: false, history: false },
+  parts: loadParts(),        // the bubbles that are on; all three can be off
+  measurements: {},          // row -> {amps, volts, watts, reading}: kept so a bubble redraws the rows at once
   stateBusy: false,          // a vehicle-state command is in flight: the poll must not move or enable the dropdown
   boardState: null,          // the state the board presents (A, B or C) once known, else null
   expected: null,            // {letter, until}: the letter the board just accepted, kept until it reports it or 3 s pass
@@ -31,9 +55,29 @@ function formatVolts(value) {
   return `${Math.round(value)} V`;
 }
 
-// "11.8 A / 232 V / 8245 W", with a dash for whatever is not measured.
-function formatTriple(amps, volts, watts) {
-  return `${formatAmpsValue(amps)} / ${formatVolts(volts)} / ${formatWatts(watts)}`;
+// Amps in the measurements always show one decimal (15.0 A), so the column lines up.
+function formatAmpsFixed(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(1)} A`;
+}
+
+// "11.8 A / 232 V / 8245 W": only the parts whose bubble is on, a dash for one that is not measured, and a slash only
+// between two parts that are shown.
+function formatMeasurement(amps, volts, watts) {
+  const text = { A: formatAmpsFixed(amps), V: formatVolts(volts), W: formatWatts(watts) };
+  return PARTS.filter((part) => dashboardState.parts.has(part)).map((part) => text[part]).join(" / ");
+}
+
+const MEASUREMENT_ROWS = { charger: "meter-charger", dc: "inverter-dc", ac: "inverter-ac" };
+
+function drawMeasurement(row) {
+  const m = dashboardState.measurements[row];
+  if (m) setValue(MEASUREMENT_ROWS[row], formatMeasurement(m.amps, m.volts, m.watts), m.reading);
+}
+
+function setMeasurement(row, amps, volts, watts, reading) {
+  dashboardState.measurements[row] = { amps, volts, watts, reading };
+  drawMeasurement(row);
 }
 
 function ageText(reading) {
@@ -87,8 +131,8 @@ function renderTelemetry(data) {
 
   const inverter = data.inverter || {};
   const value = (name) => (inverter[name] ? inverter[name].value : null);
-  setValue("inverter-dc", formatTriple(value("dc_a"), value("dc_v"), value("dc_w")), inverter.dc_w);
-  setValue("inverter-ac", formatTriple(value("ac_a"), value("ac_v"), value("ac_w")), inverter.ac_w);
+  setMeasurement("dc", value("dc_a"), value("dc_v"), value("dc_w"), inverter.dc_w);
+  setMeasurement("ac", value("ac_a"), value("ac_v"), value("ac_w"), inverter.ac_w);
   byId("measurements-updated").textContent = `Inverter · ${ageText(inverter.dc_w)}`;
 }
 
@@ -186,6 +230,17 @@ byId("chart-unit").addEventListener("change", (event) => {
   redrawChart();
 });
 window.addEventListener("resize", redrawChart);
+for (const part of PARTS) {
+  const bubble = byId("part-" + part);
+  bubble.setAttribute("aria-pressed", String(dashboardState.parts.has(part)));
+  bubble.addEventListener("click", () => {
+    if (dashboardState.parts.has(part)) dashboardState.parts.delete(part);
+    else dashboardState.parts.add(part);
+    bubble.setAttribute("aria-pressed", String(dashboardState.parts.has(part)));
+    saveParts();
+    for (const row of Object.keys(MEASUREMENT_ROWS)) drawMeasurement(row);
+  });
+}
 buildLegend();
 pollTelemetry();
 pollHistory();

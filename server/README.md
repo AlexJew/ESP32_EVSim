@@ -75,7 +75,9 @@ The same page shows the whole chain. It never writes to the inverter. Its only M
 - **The chart** keeps the last 10 minutes in memory (a restart empties it): the board's raw setpoint (the mean of the
   5 Hz samples in each second), the 1 s average, the DC target and the inverter's DC power. A value that is stale or
   missing leaves a gap. Click a legend entry to hide or show a line.
-- **Measurements:** the Car charger, DC input and AC output rows each read "current / voltage / power". The charger's
+- **Measurements:** the Car charger, DC input and AC output rows each read "current / voltage / power". The
+  **A**, **V** and **W** bubbles in the card's header switch each part on or off for all three rows (all three may be off; the
+  choice is kept in the browser). Amps always show one decimal. The charger's
   values come from the AMTRON's meter (current and voltage are the mean of the three phases; total power from register
   220). The inverter's come from `evsim/inverter`: `dc_a`, `dc_v`, `dc_w` (MPPT 1) and `ac_a`, `ac_v` (means of the
   three phases), `ac_w`. A setpoint server older than 2026-10-07 does not publish the currents and voltages: they show

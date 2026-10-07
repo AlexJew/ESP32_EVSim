@@ -129,3 +129,8 @@ footer { align-items: center; color: var(--muted); font-size: .79rem; margin-top
   background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
 }
+
+/* The A, V and W bubbles of the Measurements card reuse the legend toggles, smaller. */
+.list-heading { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.chips { display: flex; gap: 6px; }
+.legend-item.chip { font-size: .8rem; min-height: 32px; padding: 4px 12px; }

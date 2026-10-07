@@ -39,7 +39,7 @@ A proper electric-car emulation is planned. It will replace the `evsim/setpoint`
 
 ### Subscriber
 
-- Client id `evsim-charger-web`. It must differ from the setpoint server's `evsim-setpoint-server`: two clients with the same id kick each other off the broker.
+- Client id `evsim-charger-web-` plus a random suffix per process (amended 2026-10-07: a fixed id made a second page, or an old copy still running, kick this one off the broker every second; seen live). Never the setpoint server's `evsim-setpoint-server`: two clients with the same id kick each other off the broker.
 - It connects asynchronously with a 1 to 5 s reconnect delay, so an absent broker never blocks start-up, and **subscribes inside `on_connect`**, so the subscriptions are renewed on every reconnect. Subscriptions are QoS 0. It has no will and publishes nothing.
 - Topics: `evsim/cp`, the setpoint topic, `evsim/inverter`. The setpoint topic is `EVSIM_SETPOINT_TOPIC`, default `evsim/setpoint`; a value that is empty, longer than 128 characters or contains `+`, `#` or whitespace is refused at start-up.
 - Broker: `EVSIM_MQTT_HOST` (default `127.0.0.1`), port 1883.

@@ -7,6 +7,7 @@ paho's network thread calls the on_* callbacks; one lock guards the state they a
 """
 
 import logging
+import secrets
 import threading
 import time
 from collections import deque
@@ -26,7 +27,10 @@ def build_client():
         import paho.mqtt.client as mqtt
     except ImportError as exc:
         raise ValueError("the dashboard needs paho-mqtt; run: pip install -r requirements.txt") from exc
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=config.MQTT_CLIENT_ID)
+    # A random suffix: two clients with one id kick each other off the broker, so a second page (another port, an old
+    # copy still running) would make both reconnect every second and lose the board's replies.
+    client_id = f"{config.MQTT_CLIENT_ID}-{secrets.token_hex(3)}"
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
     client.reconnect_delay_set(min_delay=config.MQTT_RECONNECT_MIN_S, max_delay=config.MQTT_RECONNECT_MAX_S)
     return client
 

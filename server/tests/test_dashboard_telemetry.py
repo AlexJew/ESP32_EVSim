@@ -222,8 +222,15 @@ class ConfigurableTopicTest(unittest.TestCase):
 class BuildClientTest(unittest.TestCase):
     def test_the_client_has_its_own_id_and_never_connects_by_itself(self):
         client = build_client()
-        self.assertEqual(client._client_id, b"evsim-charger-web")
+        self.assertTrue(client._client_id.startswith(b"evsim-charger-web-"))
+        self.assertNotEqual(client._client_id, b"evsim-setpoint-server")
         self.assertFalse(client.is_connected())
+
+    def test_two_pages_never_share_an_id_because_equal_ids_kick_each_other_off_the_broker(self):
+        # seen live on 2026-10-07: a second page on another port made both reconnect every second, and a state
+        # command published by one never received the board's reply
+        ids = {build_client()._client_id for _ in range(20)}
+        self.assertEqual(len(ids), 20)
 
 
 if __name__ == "__main__":

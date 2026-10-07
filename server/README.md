@@ -67,7 +67,7 @@ The same page shows the whole chain. It never writes to the inverter. Its only M
 - **Inverter:** MPPT 1's DC power is the `dc_w` field of `evsim/inverter`, which the setpoint server's inverter writer
   publishes once a second. The page never connects to the inverter itself, so the DC power and the DC target appear
   only while the setpoint server runs with `--inverter`.
-- **MQTT:** the page subscribes (client id `evsim-charger-web`) to `evsim/cp`, the setpoint topic and
+- **MQTT:** the page subscribes (client id `evsim-charger-web-` plus a random suffix, so a second page never kicks it off) to `evsim/cp`, the setpoint topic and
   `evsim/inverter`, on the broker at `127.0.0.1:1883`. `EVSIM_MQTT_HOST` changes the broker. A retained message, such as `server_offline`, is shown as the last known state and flagged stale.
 - **The setpoint topic** is `evsim/setpoint`. Set `EVSIM_SETPOINT_TOPIC` (for example `evsim/electric_car`) to follow
   another topic. Its message must carry a numeric `setpoint_w`; `charger_web/parsers.py` (`parse_setpoint`) is the

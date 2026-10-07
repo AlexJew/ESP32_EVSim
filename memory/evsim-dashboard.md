@@ -9,7 +9,7 @@ The charger page became an EVSim dashboard on 2026-10-01 (spec `docs/superpowers
 plan `docs/superpowers/plans/2026-10-01-evsim-dashboard.md`). Same process, same port (8080), still loopback only.
 
 - **Inverter:** the page never touches it. The DC power is `dc_w` in the setpoint server's `evsim/inverter` message (MPPT 1, read by the server's writer once a second), so it exists only while the server runs with `--inverter`. A direct read-only Modbus reader was designed first and dropped (commit 2d4d134); it would be the way back if an independent view is needed.
-- **MQTT:** `charger_web/telemetry.py` subscribes (client id `evsim-charger-web`, never the setpoint server's id) to
+- **MQTT:** `charger_web/telemetry.py` subscribes (client id `evsim-charger-web-<random>`, never the setpoint server's id) to
   `evsim/cp`, the setpoint topic and `evsim/inverter`; parsers in `parsers.py`. Retained messages are shown stale.
 - **History:** `charger_web/history.py`, 600 frames at 1 Hz in memory; the chart is `static/chart.js`.
 - **For the car emulation:** the setpoint topic is `EVSIM_SETPOINT_TOPIC` (default `evsim/setpoint`). When
@@ -48,3 +48,25 @@ Spec `docs/superpowers/specs/2026-10-07-evsim-measurements-and-state-control-des
 - **The page now publishes once:** `POST /api/vehicle/state` sends A, B or C to `evsim/cmd/state` (QoS 0, not retained: paho queues QoS 1 and replays it after a reconnect, so a command shown as failed could run later)
   and waits 3 s for the matching line on `evsim/reply`. Replies have no command id, so they are matched by content; one
   command at a time (409 otherwise). "Validated" = the board accepted; the charger is not waited for.
+
+## Live check of the measurements and state control, 2026-10-07
+
+Page on port 8081 against the real broker, board, AMTRON and inverter, with the setpoint server restarted from the branch
+(`--inverter`); charger offering about 11 A, 8.2 kW.
+
+- **The numbers agree.** Inverter DC input 15.1 A / 513 V / about 7 760 W: the same in the page, in `evsim/inverter` and in
+  `tools/fronius_modbus.py status` (15.12 A, 512.8 V, 7 756 W). AC output 10.8 A / 232.4 V / 7 515 W (7 515 / 3 / 232.4 = 10.8 A).
+  Charger: phase powers 2 765 + 2 713 + 2 775 = 8 253 W against register 220 = 8 254 W, phase voltages 230-231 V,
+  currents 11.8 to 12.1 A. The inferred meter registers (206-210, 220, 222-226) are confirmed by this arithmetic again.
+- **History:** 125 frames after two minutes, every key present; the only gaps were the first seconds (page started before the
+  first inverter message) and 13 seconds without a raw board sample (`cp_w`), which is the board's own publishing gaps.
+- **State commands (B, C, C again, never A):** `{"state":"B"}` gave 200 `state C -> B`, `C` gave 200 `state B -> C`, `C` again gave 200
+  `already in C`; a lower-case letter gave 400, a foreign Origin 403. The board's lines appeared on `evsim/reply`.
+- **A brief B then C cost about 55 s:** the charger sat at 150-210 W (0.8 A) with the inverter's DC input at 0 W, then returned
+  to 8.2 kW and the inverter followed. Much shorter than the two minutes after a longer state A.
+- **Bug found by the check, fixed:** the first run said "The board did not answer" (the board had in fact accepted B and was
+  left in B; restored with `mosquitto_pub`) and then "Not connected". Cause: the page on port 8080 started earlier had the same
+  MQTT client id, and two clients with one id kick each other off the broker (85 disconnects in a minute). Each page process now
+  adds a random suffix to its client id; with the old page still running, 0 disconnects. Test: two clients never share an id.
+- **Not checked:** the page in a browser (dropdown, rows, three chart quantities); a refusal such as A to C (it needs state A,
+  which was never commanded).

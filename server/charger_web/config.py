@@ -19,7 +19,7 @@ MAX_LIMIT_A = 16                  # the highest limit the page accepts
 # The dashboard (docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md). Read-only, except the state command.
 DEFAULT_MQTT_HOST = "127.0.0.1"   # Mosquitto on the same computer
 MQTT_PORT = 1883
-MQTT_CLIENT_ID = "evsim-charger-web"   # must differ from "evsim-setpoint-server": equal ids kick each other off
+MQTT_CLIENT_ID = "evsim-charger-web"   # a prefix: each process adds a random suffix, since equal ids kick each other off
 MQTT_KEEPALIVE_S = 10
 MQTT_RECONNECT_MIN_S = 1
 MQTT_RECONNECT_MAX_S = 5

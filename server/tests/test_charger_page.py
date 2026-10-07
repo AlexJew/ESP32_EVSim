@@ -74,6 +74,21 @@ class PageTest(unittest.TestCase):
         self.assertEqual((pill["data-kind"], pill["role"], pill["aria-live"]), ("idle", "status", "polite"))
         self.assertIn("No command yet", (STATIC / "index.html").read_text(encoding="utf-8"))
 
+    def test_the_vehicle_state_is_a_dropdown_of_a_b_and_c(self):
+        select = [attrs for tag, attrs in parsed_page().tags if attrs.get("id") == "vehicle-state"]
+        self.assertEqual([attrs.get("class") for attrs in select], ["unit-select"])
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        block = html[html.index('id="vehicle-state"'):html.index("</select>", html.index('id="vehicle-state"'))]
+        self.assertEqual(re.findall(r'<option value="([^"]*)"', block), ["", "A", "B", "C"])
+        self.assertIn("disabled", block.split(">")[0])                   # off until the board's state is known
+        self.assertNotIn("stepper", html)
+
+    def test_the_chart_offers_power_current_and_voltage(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        start = html.index('id="chart-unit"')
+        block = html[start:html.index("</select>", start)]
+        self.assertEqual(re.findall(r'<option value="([^"]*)">', block), ["W", "A", "V"])
+
     def test_the_chart_offers_power_and_current(self):
         select = [attrs for tag, attrs in parsed_page().tags if tag == "select" and attrs.get("id") == "chart-unit"]
         self.assertEqual(len(select), 1)
@@ -83,7 +98,7 @@ class PageTest(unittest.TestCase):
 
     def test_the_removed_cards_are_gone(self):
         for removed in ("operator-limit", "configured-limit", "charger-status", "board-detail", "server-detail",
-                        "target-value", "apply", "signalled-updated", "meter-updated"):
+                        "target-value", "apply", "signalled-updated", "meter-updated", "stepper-value"):
             self.assertNotIn(removed, page_ids())
 
     def test_no_rest_session_leftovers_in_the_page(self):
@@ -140,6 +155,18 @@ class PageTest(unittest.TestCase):
             node_json("[c.axisAmps(0), c.axisAmps(11.8), c.axisAmps(16), c.axisAmps(17.1)]"),
             [{"top": 16, "step": 4}] * 3 + [{"top": 20, "step": 4}],
         )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_voltage_axis_steps_by_100_volts_and_never_goes_below_300(self):
+        self.assertEqual(
+            node_json("[c.axisVolts(0), c.axisVolts(233), c.axisVolts(524.7), c.axisVolts(1000)]"),
+            [{"top": 300, "step": 100}, {"top": 300, "step": 100}, {"top": 600, "step": 100}, {"top": 1000, "step": 100}],
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_voltage_view_names_its_lines_after_the_other_two(self):
+        volts = node_json("c.VOLT_SERIES.map((s) => [s.id, s.key])")
+        self.assertEqual(volts, [["car", "charger_v"], ["dc", "dc_v"], ["ac", "ac_v"]])
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_the_two_views_name_their_lines(self):

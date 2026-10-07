@@ -28,19 +28,13 @@
       <div class="state-block">
         <p class="eyebrow">Car charger state</p>
         <div class="state-row">
-          <span class="control-label">State</span>
-          <div class="stepper">
-            <output id="vehicle-state" class="stepper-value">—</output>
-            <div class="stepper-buttons">
-              <!-- The state cannot be set from this page yet: the buttons stay disabled until a write path exists. -->
-              <button type="button" disabled aria-label="Next vehicle state" title="Setting the state is not available yet">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l4-4 4 4"></path></svg>
-              </button>
-              <button type="button" disabled aria-label="Previous vehicle state" title="Setting the state is not available yet">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5l4 4 4-4"></path></svg>
-              </button>
-            </div>
-          </div>
+          <label class="control-label" for="vehicle-state">State</label>
+          <select id="vehicle-state" class="unit-select" aria-label="Vehicle state" disabled>
+            <option value="" selected disabled>—</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </select>
         </div>
         <div class="status-row">
           <span>Status</span>
@@ -80,6 +74,7 @@
             <select id="chart-unit" class="unit-select" aria-label="Chart quantity">
               <option value="W">Power [W]</option>
               <option value="A">Current [A]</option>
+              <option value="V">Voltage [V]</option>
             </select>
           </div>
           <span id="chart-note" class="ceiling">Waiting for history</span>

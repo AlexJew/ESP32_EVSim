@@ -66,6 +66,8 @@ STATUS = {
     "installation_limit_a": {"value": 16, "status": "ok", "updated_at": None},
     "signalled_current_a": {"value": 10, "status": "ok", "updated_at": None},
     "meter_current_a": {"value": {"L1": 11.7, "L2": 11.6, "L3": 12.0}, "status": "ok", "updated_at": None},
+    "meter_voltage_v": {"value": {"L1": 231, "L2": 232, "L3": 233}, "status": "ok", "updated_at": None},
+    "meter_power_w": {"value": 600, "status": "ok", "updated_at": None},
     "vehicle_state": {"value": "C", "status": "ok", "updated_at": None},
     "charger_status": {"value": "Charging", "status": "ok", "updated_at": None},
     "desired_limit_a": 10, "restored_at": None,
@@ -97,8 +99,8 @@ def reading(value):
 class SliderTest(unittest.TestCase):
     def test_the_page_shows_what_the_charger_reports(self):
         first = run([])[0]
-        self.assertEqual((first["slider"], first["limit"], first["state"]), ("10", "10 A", "C"))
-        self.assertEqual((first["signalled"], first["charger"]), ("10 A", "11.8 A / —"))    # mean of the three phases
+        self.assertEqual((first["slider"], first["limit"]), ("10", "10 A"))
+        self.assertEqual((first["signalled"], first["charger"]), ("10 A", "11.8 A / 232 V / 600 W"))   # means of the phases
         self.assertEqual(first["installation"], "Installation limit: 16 A")
         self.assertEqual(first["posts"], [])
 

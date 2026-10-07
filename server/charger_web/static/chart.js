@@ -21,6 +21,11 @@ const CURRENT_SERIES = [
   { id: "dc", key: "dc_a", label: "DC input", color: "#2a5fa8" },
   { id: "ac", key: "ac_a", label: "AC output", color: "#7b4fa3" },
 ];
+const VOLT_SERIES = [
+  { id: "car", key: "charger_v", label: "Car charger", color: "#c27b14" },
+  { id: "dc", key: "dc_v", label: "DC input", color: "#2a5fa8" },
+  { id: "ac", key: "ac_v", label: "AC output", color: "#7b4fa3" },
+];
 const WINDOW_S = 600;
 const MAX_GAP_S = 2.5;      // frames come once a second; a longer silence is a gap, not a slope
 const GRID = "#dce4df";
@@ -61,6 +66,11 @@ function axisAmps(value) {
   return { top: Math.max(16, Math.ceil(value / 4) * 4), step: 4 };
 }
 
+// The same for volts: 100 V steps, never lower than 300 V so the 230 V mains and the 520 V DC side both fit.
+function axisVolts(value) {
+  return { top: Math.max(300, Math.ceil(value / 100) * 100), step: 100 };
+}
+
 function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 860;
@@ -82,7 +92,7 @@ function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
       if (typeof frame[series.key] === "number" && frame[series.key] > highest) highest = frame[series.key];
     }
   }
-  const scale = view.unit === "A" ? axisAmps(highest) : axis(highest);
+  const scale = ({ W: axis, A: axisAmps, V: axisVolts }[view.unit] || axis)(highest);
   const x = (t) => left + ((t - tMin) / WINDOW_S) * plotW;
   const y = (v) => top + plotH - (v / scale.top) * plotH;
 
@@ -126,5 +136,5 @@ function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SERIES, POWER_SERIES, CURRENT_SERIES, segments, axis, axisAmps };
+  module.exports = { SERIES, POWER_SERIES, CURRENT_SERIES, VOLT_SERIES, segments, axis, axisAmps, axisVolts };
 }

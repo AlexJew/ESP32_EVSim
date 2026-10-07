@@ -115,3 +115,5 @@ footer { align-items: center; color: var(--muted); font-size: .79rem; margin-top
   .ceiling { text-align: left; }
   dd { font-size: 1.1rem; }
 }
+
+.unit-select:disabled { cursor: not-allowed; opacity: .5; }

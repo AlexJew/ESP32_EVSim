@@ -80,16 +80,16 @@ function applyStatus(status) {
   const empty = { value: null, status: "unavailable" };
   const signalled = status.signalled_current_a || empty;
   const meter = status.meter_current_a || empty;
-  const charger = meter.status === "ok" ? meanOf(meter.value) : null;
+  const voltage = status.meter_voltage_v || empty;
+  const power = status.meter_power_w || empty;
 
   const signalledCell = el("signalled-current");
   signalledCell.textContent = formatAmpsValue(signalled.value);
   signalledCell.dataset.status = signalled.status;
   const chargerCell = el("meter-charger");
-  chargerCell.textContent = formatPair(meanOf(meter.value), null);   // watts are not read from the charger yet
-  chargerCell.dataset.status = meter.status;
-  chargerCell.title = "Mean of the three phases";
-  recordCurrentSample(signalled, charger);
+  chargerCell.textContent = formatTriple(meanOf(meter.value), meanOf(voltage.value), power.value);
+  chargerCell.dataset.status = power.status;
+  chargerCell.title = "Current and voltage: mean of the three phases";
 
   const setLimit = status.set_limit_a || empty;
   const operator = status.operator_limit_a || empty;
@@ -101,7 +101,6 @@ function applyStatus(status) {
   warning.textContent = status.operator_below_set
     ? `The AMTRON page's limit of ${operator.value} A caps the signalled current.`
     : "";
-  el("vehicle-state").textContent = (status.vehicle_state && status.vehicle_state.value) || "—";
   updateBanner(status);
 
   slider.max = installation.value === null ? 16 : Math.min(16, installation.value);
@@ -178,6 +177,35 @@ async function sendLimit(value) {
     }
   }
 }
+
+// The state dropdown: choosing a letter commands the board; "Validated" means the board accepted it.
+const stateSelect = el("vehicle-state");
+
+async function sendState(letter) {
+  if (dashboardState.stateBusy || !["A", "B", "C"].includes(letter)) return;
+  dashboardState.stateBusy = true;
+  stateSelect.disabled = true;
+  setStatus("pending", "Sending…");
+  try {
+    const response = await fetch("/api/vehicle/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: letter }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.error || "The board did not accept the command.");
+    setStatus("ok", "Validated");
+  } catch (error) {
+    setStatus("error", "Not validated", error.message);
+    stateSelect.value = dashboardState.boardState || "";      // back to what the board presents
+  } finally {
+    dashboardState.stateBusy = false;
+    stateSelect.disabled = dashboardState.boardState === null;
+    pollTelemetry();
+  }
+}
+
+stateSelect.addEventListener("change", () => void sendState(stateSelect.value));
 
 slider.addEventListener("input", () => {
   editing = true;

@@ -1,12 +1,18 @@
-// The setpoints, the inverter readings and the chart: polls /api/telemetry every second and /api/history every two.
-// The current chart has no server history yet, so it keeps its own samples (one per charger poll) since the page opened.
+// The setpoints, the measurements and the chart: polls /api/telemetry every second and /api/history every two.
+// All three charts (power, current, voltage) draw the server's 10-minute history.
 const byId = (id) => document.getElementById(id);
 const dashboardState = {
   frames: [],
-  currentFrames: [],
   unit: "W",
-  visible: new Set([...POWER_SERIES, ...CURRENT_SERIES].map((series) => series.id)),
+  visible: new Set([...POWER_SERIES, ...CURRENT_SERIES, ...VOLT_SERIES].map((series) => series.id)),
   busy: { telemetry: false, history: false },
+  stateBusy: false,          // a vehicle-state command is in flight: the poll must not move or enable the dropdown
+  boardState: null,          // the state the board presents (A, B or C) once known, else null
+};
+const VIEWS = {
+  W: POWER_VIEW,
+  A: { series: CURRENT_SERIES, unit: "A", maxGapS: MAX_GAP_S },
+  V: { series: VOLT_SERIES, unit: "V", maxGapS: MAX_GAP_S },
 };
 
 function formatWatts(value) {
@@ -19,9 +25,14 @@ function formatAmpsValue(value) {
   return `${Number.isInteger(value) ? value : value.toFixed(1)} A`;
 }
 
-// "12.8 A / 8857 W", with a dash for whatever is not measured.
-function formatPair(amps, watts) {
-  return `${formatAmpsValue(amps)} / ${formatWatts(watts)}`;
+function formatVolts(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `${Math.round(value)} V`;
+}
+
+// "11.8 A / 232 V / 8245 W", with a dash for whatever is not measured.
+function formatTriple(amps, volts, watts) {
+  return `${formatAmpsValue(amps)} / ${formatVolts(volts)} / ${formatWatts(watts)}`;
 }
 
 function ageText(reading) {
@@ -43,6 +54,16 @@ function setValue(id, text, reading) {
   target.dataset.status = readingStatus(reading);
 }
 
+// The dropdown shows the state the board presents; it is off when the broker is down or the state is unknown,
+// and while a command is in flight it is left alone (app.js sets it back when the command ends).
+function syncStateSelect(connected, state) {
+  const select = byId("vehicle-state");
+  const known = connected && (state === "A" || state === "B" || state === "C");
+  dashboardState.boardState = known ? state : null;
+  select.disabled = !known || dashboardState.stateBusy;
+  if (!dashboardState.stateBusy) select.value = known ? state : "";
+}
+
 function renderTelemetry(data) {
   const connected = Boolean(data.mqtt && data.mqtt.connected);
   const badge = byId("mqtt-state");
@@ -52,36 +73,32 @@ function renderTelemetry(data) {
   const board = data.board || {};
   setValue("board-setpoint", formatWatts(board.setpoint_w && board.setpoint_w.value), board.setpoint_w);
   byId("setpoints-updated").textContent = ageText(board.setpoint_w);
+  syncStateSelect(connected, board.state);
 
   const setpoint = data.setpoint || {};
   setValue("setpoint-value", formatWatts(setpoint.setpoint_w && setpoint.setpoint_w.value), setpoint.setpoint_w);
   byId("setpoint-value").title = setpoint.topic ? `Topic ${setpoint.topic}` : "";
 
   const inverter = data.inverter || {};
-  setValue("inverter-dc", formatPair(null, inverter.dc_w && inverter.dc_w.value), inverter.dc_w);
-  setValue("inverter-ac", formatPair(null, null), null);          // the AC side is not read yet
+  const value = (name) => (inverter[name] ? inverter[name].value : null);
+  setValue("inverter-dc", formatTriple(value("dc_a"), value("dc_v"), value("dc_w")), inverter.dc_w);
+  setValue("inverter-ac", formatTriple(value("ac_a"), value("ac_v"), value("ac_w")), inverter.ac_w);
   byId("measurements-updated").textContent = `Inverter · ${ageText(inverter.dc_w)}`;
 }
 
 // -- the chart ---------------------------------------------------------------------------------------
 
 function currentView() {
-  return dashboardState.unit === "W"
-    ? POWER_VIEW
-    : { series: CURRENT_SERIES, unit: "A", maxGapS: 5 };
-}
-
-function currentFrames() {
-  return dashboardState.unit === "W" ? dashboardState.frames : dashboardState.currentFrames;
+  return VIEWS[dashboardState.unit];
 }
 
 function updateLegendAvailability() {
-  const frames = currentFrames();
+  const frames = dashboardState.frames;
   for (const button of document.querySelectorAll(".legend-item")) {
     const series = currentView().series.find((item) => item.id === button.dataset.series);
     const hasData = Boolean(series) && frames.some((frame) => typeof frame[series.key] === "number");
     button.classList.toggle("no-data", !hasData);
-    button.title = hasData ? "" : "No data source for this line yet";
+    button.title = hasData ? "" : "No data for this line";
   }
 }
 
@@ -112,37 +129,18 @@ function buildLegend() {
 }
 
 function updateChartNote() {
-  const time = new Date().toLocaleTimeString();
-  byId("chart-note").textContent = dashboardState.unit === "W"
-    ? `${dashboardState.frames.length} s of history · updated ${time}`
-    : `Since this page was opened · updated ${time}`;
+  byId("chart-note").textContent = `${dashboardState.frames.length} s of history · updated ${new Date().toLocaleTimeString()}`;
 }
 
 function redrawChart() {
-  drawChart(byId("chart"), currentFrames(), dashboardState.visible, Date.now() / 1000, currentView());
+  drawChart(byId("chart"), dashboardState.frames, dashboardState.visible, Date.now() / 1000, currentView());
 }
 
 function renderHistory(data) {
   dashboardState.frames = Array.isArray(data.frames) ? data.frames : [];
-  if (dashboardState.unit === "W") {
-    updateChartNote();
-    updateLegendAvailability();
-  }
+  updateChartNote();
+  updateLegendAvailability();
   redrawChart();
-}
-
-// Called by app.js after every charger poll: the signalled current and the mean of the three phases.
-function recordCurrentSample(signalled, chargerMeanA) {
-  const nowS = Math.floor(Date.now() / 1000);
-  const okValue = (reading) => (reading && reading.status === "ok" && Number.isFinite(reading.value) ? reading.value : null);
-  const frames = dashboardState.currentFrames;
-  frames.push({ t: nowS, sig_a: okValue(signalled), charger_a: chargerMeanA });
-  while (frames.length && frames[0].t < nowS - WINDOW_S) frames.shift();
-  if (dashboardState.unit === "A") {
-    updateChartNote();
-    updateLegendAvailability();
-    redrawChart();
-  }
 }
 
 // -- polling -----------------------------------------------------------------------------------------
@@ -172,14 +170,13 @@ function pollTelemetry() {
 
 function pollHistory() {
   void pollDashboard("history", "/api/history", renderHistory, () => {
-    if (dashboardState.unit === "W") byId("chart-note").textContent = "History unavailable";
+    byId("chart-note").textContent = "History unavailable";
   });
 }
 
 byId("chart-unit").addEventListener("change", (event) => {
-  dashboardState.unit = event.target.value === "A" ? "A" : "W";
+  dashboardState.unit = ["W", "A", "V"].includes(event.target.value) ? event.target.value : "W";
   buildLegend();
-  updateChartNote();
   redrawChart();
 });
 window.addEventListener("resize", redrawChart);

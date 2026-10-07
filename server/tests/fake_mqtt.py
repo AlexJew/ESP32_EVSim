@@ -9,11 +9,20 @@ REFUSED = SimpleNamespace(is_failure=True)
 class FakeMqttClient:
     def __init__(self):
         self.subscribed = []           # (topic, qos), in order
+        self.published = []            # (topic, payload, qos, retain), in order
+        self.publish_rc = 0            # what publish() reports; 4 is paho's "not connected"
+        self.publish_hook = None       # called with (topic, payload) while publishing: a test's way to answer at once
         self.calls = []                # ("connect_async", host, port), ("loop_start",), ("disconnect",), ("loop_stop",)
         self.on_connect = self.on_message = self.on_disconnect = None
 
     def subscribe(self, topic, qos=0):
         self.subscribed.append((topic, qos))
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        self.published.append((topic, payload, qos, retain))
+        if self.publish_hook is not None:
+            self.publish_hook(topic, payload)
+        return SimpleNamespace(rc=self.publish_rc)
 
     def connect_async(self, host, port, keepalive=60):
         self.calls.append(("connect_async", host, port))

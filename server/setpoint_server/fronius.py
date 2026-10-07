@@ -21,6 +21,7 @@ MAX_READ = 60                     # registers per request; longer reads are spli
 # Offsets, in registers, from the first data register of each model (SunSpec).
 M1_MN, M1_MD, M1_VR = 0, 16, 40                            # common: manufacturer, model, version
 M103_W, M103_W_SF, M103_ST = 12, 13, 36                    # inverter (integer): AC power, its SF, state
+M103_AP, M103_A_SF, M103_PHV, M103_V_SF = 1, 4, 8, 11      # phase currents, their SF, phase voltages, their SF
 M121_WMAX, M121_WMAX_SF = 0, 20                            # basic settings
 M123_CONN, M123_PCT, M123_RVRT, M123_ENA, M123_PCT_SF = 2, 3, 5, 7, 21   # immediate controls
 M160_SF_A, M160_SF_V, M160_SF_W, M160_N, M160_MODULES = 0, 1, 2, 6, 8    # MPPT extension
@@ -42,6 +43,19 @@ def scaled(raw, sf):
 def text(regs):
     raw = b"".join(struct.pack(">H", r) for r in regs)
     return raw.split(b"\0")[0].decode("ascii", "replace").strip()
+
+
+def mean_of_phases(d, first, sf_index):
+    """The mean of three consecutive uint16 phase registers with the scale factor at `sf_index`.
+
+    A phase that reads 0xFFFF (not implemented) is left out; None if none is implemented or the scale
+    factor is not implemented (0x8000).
+    """
+    sf = d[sf_index]
+    if sf == 0x8000:
+        return None
+    values = [scaled(raw, sf) for raw in d[first:first + 3] if raw != 0xFFFF]
+    return sum(values) / len(values) if values else None
 
 
 def pct_register(watts, wmax_w, sf):
@@ -177,7 +191,8 @@ class Inverter:
                 mppt.append({"id": b[0], "name": text(b[1:9]),
                              "dc_a": f(b[9], m[M160_SF_A]), "dc_v": f(b[10], m[M160_SF_V]),
                              "dc_w": f(b[11], m[M160_SF_W])})
-        return {"ac_w": ac, "state": d[M103_ST], "mppt": mppt}
+        return {"ac_w": ac, "ac_a": mean_of_phases(d, M103_AP, M103_A_SF), "ac_v": mean_of_phases(d, M103_PHV, M103_V_SF),
+                "state": d[M103_ST], "mppt": mppt}
 
     # -- writing: the only three registers this tool can touch --------------------------
 

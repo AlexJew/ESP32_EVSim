@@ -1,4 +1,4 @@
-"""Run the local EVSim page: the AMTRON charger over Modbus TCP, plus the read-only dashboard."""
+"""Run the local EVSim page: the AMTRON charger over Modbus TCP, plus the dashboard (read-only, and the vehicle-state command)."""
 
 import argparse
 import logging
@@ -40,7 +40,7 @@ def main(argv=None):
     try:
         try:
             service = ChargerService()
-            dashboard = build_dashboard()
+            dashboard = build_dashboard(service)
         except ValueError as exc:
             parser.error(str(exc))
         server = create_server(charger=service, dashboard=dashboard, host=args.host, port=args.port)   # bind first: a taken port must not start a poll

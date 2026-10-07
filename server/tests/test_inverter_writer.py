@@ -42,13 +42,17 @@ class WriterTest(unittest.TestCase):
         return json.loads(self.status[-1])
 
     def test_a_target_is_written_committed_and_reported(self):
+        self.fake.put(M103 + 1, [5976, 5976, 5977, 65533])          # phase currents, SF -3
+        self.fake.put(M103 + 8, [2329, 2331, 2338, 65535])          # phase voltages, SF -1
         self.writer.set_target(4000.0)
         self.writer.step_once()
         self.assertEqual(self.fake.writes, [(PCT, 3233), (ENA, 1)])
         s = self.last()
         self.assertEqual((s["mode"], s["target_dc_w"], s["cap_ac_w"]), ("capped", 4000.0, 3879.2))
         self.assertEqual((s["dc_w"], s["ac_w"], s["inverter_state"], s["error"]), (7272, 7047, 4, None))
-        self.assertEqual(list(s), ["mode", "target_dc_w", "cap_ac_w", "dc_w", "ac_w", "inverter_state", "error", "ts"])
+        self.assertEqual((s["dc_a"], s["dc_v"], s["ac_a"], s["ac_v"]), (14.1, 515.0, 6.0, 233.3))
+        self.assertEqual(list(s), ["mode", "target_dc_w", "cap_ac_w", "dc_w", "dc_a", "dc_v", "ac_w", "ac_a", "ac_v",
+                                   "inverter_state", "error", "ts"])
         self.assertEqual(s["ts"], "2026-09-30T13:42:07Z")
 
     def test_starting_with_no_data_asserts_a_zero_cap(self):
@@ -104,6 +108,17 @@ class WriterTest(unittest.TestCase):
         self.writer.step_once()
         self.assertEqual(fake2.writes, [(PCT, 3233), (ENA, 1)])
         self.assertEqual(self.last()["mode"], "capped")
+
+    def test_an_unreachable_inverter_reports_null_measurements(self):
+        self.writer.set_target(4000.0)
+        self.writer.step_once()
+        self.fake.stop()
+        self.clock.t += 1
+        self.writer.set_target(4000.0)
+        self.writer.step_once()
+        s = self.last()
+        self.assertEqual(s["mode"], "unreachable")
+        self.assertEqual([s[k] for k in ("dc_w", "dc_a", "dc_v", "ac_w", "ac_a", "ac_v")], [None] * 6)
 
     def test_a_failed_commit_is_re_asserted_after_reconnecting(self):
         self.fake.refuse = {ENA}                        # the value is written, the commit refused

@@ -8,12 +8,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .commands import CommandError
 from .service import ChargerError, ChargerService, LimitValidationError
 from .config import DEFAULT_WEB_HOST, DEFAULT_WEB_PORT
 
 log = logging.getLogger("charger_web.http")
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_BODY_BYTES = 1024
+LIMIT_PATH = "/api/charger/operator-limit"
+STATE_PATH = "/api/vehicle/state"
+POST_KEYS = {LIMIT_PATH: "current_limit_a", STATE_PATH: "state"}      # each write takes exactly this one key
 
 
 class _LocalHTTPServer(ThreadingHTTPServer):
@@ -109,7 +113,8 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT, da
                 self._json(403, {"error": "Cross-origin writes are not allowed."})
                 return
             path = urlsplit(self.path).path
-            if path != "/api/charger/operator-limit":
+            key = POST_KEYS.get(path)
+            if key is None or (path == STATE_PATH and dashboard is None):
                 self._json(404, {"error": "Not found."})
                 return
             if self.headers.get_content_type() != "application/json":
@@ -127,16 +132,27 @@ def create_server(charger=None, host=DEFAULT_WEB_HOST, port=DEFAULT_WEB_PORT, da
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 self._json(400, {"error": "Request body must be valid JSON."})
                 return
-            if not isinstance(payload, dict) or set(payload) != {"current_limit_a"}:
-                self._json(400, {"error": "Expected current_limit_a."})
+            if not isinstance(payload, dict) or set(payload) != {key}:
+                self._json(400, {"error": f"Expected {key}."})
+                return
+            if path == STATE_PATH:
+                self._command(payload[key])
                 return
             try:
-                result = client.set_limit(payload["current_limit_a"])
+                result = client.set_limit(payload[key])
             except LimitValidationError as exc:
                 self._json(400, {"success": False, "error": str(exc)})
                 return
             except ChargerError as exc:
                 self._json(503, {"success": False, "error": str(exc)})
+                return
+            self._json(200, result)
+
+        def _command(self, state):
+            try:
+                result = dashboard.set_state(state)
+            except CommandError as exc:
+                self._json(exc.status, {"success": False, "error": str(exc)})
                 return
             self._json(200, result)
 

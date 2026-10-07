@@ -28,7 +28,7 @@ Watch the output:
 ## Local AMTRON charger page
 
 A small page, run as a separate process from the MQTT averaging server, to read the AMTRON's current and set its
-limit over **Modbus TCP**. It also shows, read-only, the Fronius inverter's DC power, the board's `evsim/cp`, the
+limit over **Modbus TCP**. It also shows the Fronius inverter's DC power, the board's `evsim/cp`, the
 setpoint topic and the server's DC target (all from MQTT), with a 10-minute chart (see "The dashboard" below). It binds to
 `127.0.0.1`, so it is available only on the development computer. It needs `paho-mqtt` (see `requirements.txt`).
 
@@ -61,12 +61,13 @@ Design: `docs/superpowers/specs/2026-10-01-charger-modbus-backend-design.md`. Th
 
 ### The dashboard
 
-The same page shows the whole chain. Nothing in it can write to the inverter or publish to MQTT.
+The same page shows the whole chain. It never writes to the inverter. Its only MQTT write is the vehicle-state command
+(see "Vehicle state" below); everything else on the page is read-only.
 
 - **Inverter:** MPPT 1's DC power is the `dc_w` field of `evsim/inverter`, which the setpoint server's inverter writer
   publishes once a second. The page never connects to the inverter itself, so the DC power and the DC target appear
   only while the setpoint server runs with `--inverter`.
-- **MQTT:** the page subscribes (client id `evsim-charger-web`) to `evsim/cp`, the setpoint topic and
+- **MQTT:** the page subscribes (client id `evsim-charger-web-` plus a random suffix, so a second page never kicks it off) to `evsim/cp`, the setpoint topic and
   `evsim/inverter`, on the broker at `127.0.0.1:1883`. `EVSIM_MQTT_HOST` changes the broker. A retained message, such as `server_offline`, is shown as the last known state and flagged stale.
 - **The setpoint topic** is `evsim/setpoint`. Set `EVSIM_SETPOINT_TOPIC` (for example `evsim/electric_car`) to follow
   another topic. Its message must carry a numeric `setpoint_w`; `charger_web/parsers.py` (`parse_setpoint`) is the
@@ -74,6 +75,17 @@ The same page shows the whole chain. Nothing in it can write to the inverter or 
 - **The chart** keeps the last 10 minutes in memory (a restart empties it): the board's raw setpoint (the mean of the
   5 Hz samples in each second), the 1 s average, the DC target and the inverter's DC power. A value that is stale or
   missing leaves a gap. Click a legend entry to hide or show a line.
+- **Measurements:** the Car charger, DC input and AC output rows each read "current / voltage / power". The
+  **A**, **V** and **W** bubbles in the card's header switch each part on or off for all three rows (all three may be off; the
+  choice is kept in the browser). Amps always show one decimal. The charger's
+  values come from the AMTRON's meter (current and voltage are the mean of the three phases; total power from register
+  220). The inverter's come from `evsim/inverter`: `dc_a`, `dc_v`, `dc_w` (MPPT 1) and `ac_a`, `ac_v` (means of the
+  three phases), `ac_w`. A setpoint server older than 2026-10-07 does not publish the currents and voltages: they show
+  dashes. The chart switches between Power, Current and Voltage; all three draw the same server-side history.
+- **Vehicle state:** the dropdown shows the state the board presents and, when you pick A, B or C, publishes it to
+  `evsim/cmd/state` (QoS 0, so an unconfirmed command is never replayed after a reconnect) and waits up to 3 s for the board's answer on `evsim/reply`. "Validated" means the board accepted it;
+  "Not validated" gives the board's reason (for example A to C is refused until B). This is the page's only write to
+  MQTT. Going to A opens the pilot: the charger stops and the inverter loses its DC input for about two minutes.
 - Each source fails alone: with the broker down the charger part still works, and the reverse.
 
 Design: `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md`.

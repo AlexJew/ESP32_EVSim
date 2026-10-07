@@ -21,6 +21,10 @@ DEFAULTS = {
     212: 0, 213: 874,         # METER_CUR_L1 = 874 mA (high word, low word)
     214: 0, 215: 651,
     216: 0, 217: 808,
+    220: 0, 221: 600,         # total active power, 600 W
+    222: 0, 223: 231,         # phase voltages L1, L2, L3, V
+    224: 0, 225: 232,
+    226: 0, 227: 233,
 }
 
 

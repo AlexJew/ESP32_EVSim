@@ -1,5 +1,5 @@
 {
-  "_note": "AMTRON Charge Control (CC612), MENNEKES ECU Modbus TCP spec rev 1.07, confirmed on firmware 5.33 (2026-09-30). Every register is a holding register (function code 3). size 2 means two registers, high word first. Register 134 is read only; the writable limit is 1000.",
+  "_note": "AMTRON Charge Control (CC612), MENNEKES ECU Modbus TCP spec rev 1.07, confirmed on firmware 5.33 (2026-09-30). Every register is a holding register (function code 3). size 2 means two registers, high word first. Register 134 is read only; the writable limit is 1000. Registers 220 (total active power, W) and 222, 224, 226 (phase voltages, V) were found on 2026-10-07 by reading the meter block: their meaning is inferred from the values (the phase powers at 206, 208, 210 sum to the total; current times voltage matches the phase power).",
   "unit": 255,
   "registers": {
     "set_limit_a": {"address": 1000},
@@ -10,6 +10,10 @@
     "charger_status": {"address": 104},
     "meter_current_l1_a": {"address": 212, "size": 2, "scale": 0.001},
     "meter_current_l2_a": {"address": 214, "size": 2, "scale": 0.001},
-    "meter_current_l3_a": {"address": 216, "size": 2, "scale": 0.001}
+    "meter_current_l3_a": {"address": 216, "size": 2, "scale": 0.001},
+    "meter_power_w": {"address": 220, "size": 2},
+    "meter_voltage_l1_v": {"address": 222, "size": 2},
+    "meter_voltage_l2_v": {"address": 224, "size": 2},
+    "meter_voltage_l3_v": {"address": 226, "size": 2}
   }
 }

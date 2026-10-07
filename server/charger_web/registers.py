@@ -10,6 +10,7 @@ DEFAULT_MAP = Path(__file__).with_name("amtron_registers.json")
 REQUIRED = (
     "set_limit_a", "operator_limit_a", "installation_limit_a", "signalled_current_a",
     "vehicle_state", "charger_status", "meter_current_l1_a", "meter_current_l2_a", "meter_current_l3_a",
+    "meter_power_w", "meter_voltage_l1_v", "meter_voltage_l2_v", "meter_voltage_l3_v",
 )
 
 

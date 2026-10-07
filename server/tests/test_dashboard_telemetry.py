@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import threading
 import unittest
 
 from fake_mqtt import FakeMqttClient, REFUSED
@@ -31,7 +32,7 @@ class TelemetryTest(unittest.TestCase):
         return self.telemetry.snapshot()
 
     def test_it_subscribes_to_the_three_topics_and_again_after_a_reconnect(self):
-        expected = [("evsim/cp", 0), ("evsim/setpoint", 0), ("evsim/inverter", 0)]
+        expected = [("evsim/cp", 0), ("evsim/setpoint", 0), ("evsim/inverter", 0), ("evsim/reply", 0)]
         self.assertEqual(self.client.subscribed, expected)
         self.client.drop()
         self.client.connect()
@@ -147,6 +148,50 @@ class TelemetryTest(unittest.TestCase):
         snap = self.snapshot()["setpoint"]
         self.assertEqual((snap["setpoint_w"]["status"], snap["status"]), ("ok", "ok"))
 
+    def test_the_inverter_card_carries_current_voltage_and_power_from_one_message(self):
+        self.client.deliver("evsim/inverter", '{"mode":"capped","target_dc_w":4300,"dc_w":4304.6,"dc_a":8.2,"dc_v":524.7,'
+                                              '"ac_w":4181,"ac_a":6.0,"ac_v":233.3,"inverter_state":4}')
+        inverter = self.snapshot()["inverter"]
+        self.assertEqual({k: (r["value"], r["status"]) for k, r in inverter.items()}, {
+            "dc_w": (4304.6, "ok"), "dc_a": (8.2, "ok"), "dc_v": (524.7, "ok"),
+            "ac_w": (4181.0, "ok"), "ac_a": (6.0, "ok"), "ac_v": (233.3, "ok")})
+        self.clock.t += config.MQTT_STALE_AFTER_S
+        self.assertEqual({r["status"] for r in self.snapshot()["inverter"].values()}, {"stale"})
+
+    def test_an_old_servers_message_leaves_the_new_values_unavailable(self):
+        self.client.deliver("evsim/inverter", '{"mode":"capped","target_dc_w":4300,"dc_w":4304.6,"inverter_state":4}')
+        inverter = self.snapshot()["inverter"]
+        self.assertEqual(inverter["dc_w"]["status"], "ok")
+        for name in ("dc_a", "dc_v", "ac_w", "ac_a", "ac_v"):
+            self.assertEqual(inverter[name]["status"], "unavailable", name)
+
+    def test_replies_are_waited_for_by_content_and_after_the_marker(self):
+        self.client.deliver("evsim/reply", "state A -> B")                    # before the marker: never matches
+        marker = self.telemetry.reply_marker()
+        self.client.deliver("evsim/reply", "unknown command 'X'")
+        self.client.deliver("evsim/reply", "state B -> C")
+        self.assertEqual(self.telemetry.wait_reply(marker, lambda text: text.endswith("-> C"), 0.2), "state B -> C")
+        self.assertIsNone(self.telemetry.wait_reply(marker, lambda text: text == "state A -> B", 0.05))
+
+    def test_a_reply_that_arrives_while_waiting_wakes_the_waiter(self):
+        marker = self.telemetry.reply_marker()
+        threading.Timer(0.05, self.client.deliver, ("evsim/reply", "already in B")).start()
+        self.assertEqual(self.telemetry.wait_reply(marker, lambda text: "B" in text, 2), "already in B")
+
+    def test_retained_unusable_and_non_ascii_replies_are_never_recorded(self):
+        marker = self.telemetry.reply_marker()
+        self.client.deliver("evsim/reply", "state A -> B", retain=True)
+        self.client.deliver("evsim/reply", b"\xff\xfe")
+        self.client.deliver("evsim/reply", "")
+        self.assertIsNone(self.telemetry.wait_reply(marker, lambda text: True, 0.05))
+        self.assertEqual(self.telemetry.reply_marker(), marker)
+
+    def test_replies_never_touch_the_cards_or_the_raw_samples(self):
+        self.client.deliver("evsim/reply", "state A -> B")
+        snap = self.snapshot()
+        self.assertEqual(snap["board"]["setpoint_w"]["status"], "unavailable")
+        self.assertEqual(self.telemetry.drain_cp_samples(), [])
+
     def test_raw_samples_are_drained_once_and_never_include_retained_ones(self):
         self.client.deliver("evsim/cp", CP, retain=True)
         for watts in (4300, 4350, 4400):
@@ -177,8 +222,15 @@ class ConfigurableTopicTest(unittest.TestCase):
 class BuildClientTest(unittest.TestCase):
     def test_the_client_has_its_own_id_and_never_connects_by_itself(self):
         client = build_client()
-        self.assertEqual(client._client_id, b"evsim-charger-web")
+        self.assertTrue(client._client_id.startswith(b"evsim-charger-web-"))
+        self.assertNotEqual(client._client_id, b"evsim-setpoint-server")
         self.assertFalse(client.is_connected())
+
+    def test_two_pages_never_share_an_id_because_equal_ids_kick_each_other_off_the_broker(self):
+        # seen live on 2026-10-07: a second page on another port made both reconnect every second, and a state
+        # command published by one never received the board's reply
+        ids = {build_client()._client_id for _ in range(20)}
+        self.assertEqual(len(ids), 20)
 
 
 if __name__ == "__main__":

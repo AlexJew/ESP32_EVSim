@@ -28,7 +28,7 @@ Watch the output:
 ## Local AMTRON charger page
 
 A small page, run as a separate process from the MQTT averaging server, to read the AMTRON's current and set its
-limit over **Modbus TCP**. It also shows, read-only, the Fronius inverter's DC power, the board's `evsim/cp`, the
+limit over **Modbus TCP**. It also shows the Fronius inverter's DC power, the board's `evsim/cp`, the
 setpoint topic and the server's DC target (all from MQTT), with a 10-minute chart (see "The dashboard" below). It binds to
 `127.0.0.1`, so it is available only on the development computer. It needs `paho-mqtt` (see `requirements.txt`).
 
@@ -61,7 +61,8 @@ Design: `docs/superpowers/specs/2026-10-01-charger-modbus-backend-design.md`. Th
 
 ### The dashboard
 
-The same page shows the whole chain. Nothing in it can write to the inverter or publish to MQTT.
+The same page shows the whole chain. It never writes to the inverter. Its only MQTT write is the vehicle-state command
+(see "Vehicle state" below); everything else on the page is read-only.
 
 - **Inverter:** MPPT 1's DC power is the `dc_w` field of `evsim/inverter`, which the setpoint server's inverter writer
   publishes once a second. The page never connects to the inverter itself, so the DC power and the DC target appear
@@ -80,7 +81,7 @@ The same page shows the whole chain. Nothing in it can write to the inverter or 
   three phases), `ac_w`. A setpoint server older than 2026-10-07 does not publish the currents and voltages: they show
   dashes. The chart switches between Power, Current and Voltage; all three draw the same server-side history.
 - **Vehicle state:** the dropdown shows the state the board presents and, when you pick A, B or C, publishes it to
-  `evsim/cmd/state` and waits up to 3 s for the board's answer on `evsim/reply`. "Validated" means the board accepted it;
+  `evsim/cmd/state` (QoS 0, so an unconfirmed command is never replayed after a reconnect) and waits up to 3 s for the board's answer on `evsim/reply`. "Validated" means the board accepted it;
   "Not validated" gives the board's reason (for example A to C is refused until B). This is the page's only write to
   MQTT. Going to A opens the pilot: the charger stops and the inverter loses its DC input for about two minutes.
 - Each source fails alone: with the broker down the charger part still works, and the reverse.

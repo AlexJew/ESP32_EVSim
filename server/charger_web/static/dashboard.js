@@ -8,6 +8,7 @@ const dashboardState = {
   busy: { telemetry: false, history: false },
   stateBusy: false,          // a vehicle-state command is in flight: the poll must not move or enable the dropdown
   boardState: null,          // the state the board presents (A, B or C) once known, else null
+  expected: null,            // {letter, until}: the letter the board just accepted, kept until it reports it or 3 s pass
 };
 const VIEWS = {
   W: POWER_VIEW,
@@ -60,8 +61,13 @@ function syncStateSelect(connected, state) {
   const select = byId("vehicle-state");
   const known = connected && (state === "A" || state === "B" || state === "C");
   dashboardState.boardState = known ? state : null;
+  // The board answers before it changes the state it publishes, so the first polls after "Validated" still carry the
+  // old letter: keep the accepted one on screen until the board reports it, or give up after 3 s.
+  const expected = dashboardState.expected;
+  if (expected && (state === expected.letter || Date.now() > expected.until)) dashboardState.expected = null;
+  const shown = dashboardState.expected ? dashboardState.expected.letter : known ? state : "";
   select.disabled = !known || dashboardState.stateBusy;
-  if (!dashboardState.stateBusy) select.value = known ? state : "";
+  if (!dashboardState.stateBusy) select.value = shown;
 }
 
 function renderTelemetry(data) {

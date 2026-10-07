@@ -16,7 +16,7 @@ RESTORE_MIN_INTERVAL_S = 10       # the desired limit is re-written at most this
 MIN_LIMIT_A = 6                   # the lowest non-zero limit the page accepts
 MAX_LIMIT_A = 16                  # the highest limit the page accepts
 
-# The dashboard (docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md). Read-only.
+# The dashboard (docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md). Read-only, except the state command.
 DEFAULT_MQTT_HOST = "127.0.0.1"   # Mosquitto on the same computer
 MQTT_PORT = 1883
 MQTT_CLIENT_ID = "evsim-charger-web"   # must differ from "evsim-setpoint-server": equal ids kick each other off
@@ -31,7 +31,7 @@ MAX_SETPOINT_W = 12000            # the inverter's rating; a larger setpoint_w i
 MAX_DC_W = 30000                  # a measured DC power above this is not believed (the inverter is a 12 kW unit)
 MAX_A = 100                       # likewise for a measured current ...
 MAX_V = 1000                      # ... and a measured voltage (the DC side runs near 520 V)
-TOPIC_CMD_STATE = "evsim/cmd/state"   # the page publishes A, B or C here (QoS 1, not retained)
+TOPIC_CMD_STATE = "evsim/cmd/state"   # the page publishes A, B or C here (QoS 0, not retained)
 TOPIC_REPLY = "evsim/reply"           # the board's one-line answer to every command
 STATE_REPLY_TIMEOUT_S = 3             # how long a state command waits for the board's answer
 

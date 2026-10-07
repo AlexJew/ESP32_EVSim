@@ -1,4 +1,4 @@
-"""Run the local EVSim page: the AMTRON charger over Modbus TCP, plus the read-only dashboard."""
+"""Run the local EVSim page: the AMTRON charger over Modbus TCP, plus the dashboard (read-only, and the vehicle-state command)."""
 
 import argparse
 import logging

@@ -51,7 +51,7 @@ The message gains four fields, `dc_a`, `dc_v`, `ac_a`, `ac_v`, each a number rou
 
 - **Dropdown** with the options A, B, C, in the control card. Its value follows the board's presented state (`evsim/cp` `state`) while no command is pending. With the broker down, or no state known, it shows a dash and is disabled.
 - **Choosing an option** sends `POST /api/vehicle/state` with `{"state": "A" | "B" | "C"}`: same protections as the limit write (loopback, Host and Origin checks, `application/json`, 1 KiB, exactly one key, uppercase letter required).
-- **The server** publishes the letter to `evsim/cmd/state` (QoS 1, not retained, as the board's contract requires) through the page's existing MQTT client, then waits up to **3 s** for the board's answer on `evsim/reply`. Replies are one line and carry no command id, so it matches by content and ignores unrelated ones:
+- **The server** publishes the letter to `evsim/cmd/state` (**QoS 0**, not retained: paho queues a QoS 1 message it cannot send and replays it after a reconnect, so a command shown as failed could be carried out later, and an A stops the charger) through the page's existing MQTT client, then waits up to **3 s** for the board's answer on `evsim/reply`. Replies are one line and carry no command id, so it matches by content and ignores unrelated ones:
   - accepted: `state X -> <requested>` or `already in <requested>` → **200** `{"success": true, "state": "<requested>"}`;
   - refused: `refused X -> <requested>: <reason>` (for example A to C without B first) → **409** `{"success": false, "error": "<reason>"}`;
   - no matching reply in 3 s → **503** `{"success": false, "error": "The board did not answer."}`;

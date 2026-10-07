@@ -41,7 +41,11 @@ class StateCommander:
             accepted = re.compile(r"^(state [ABC] -> %s|already in %s)$" % (state, state))
             refused = re.compile(r"^refused [ABC] -> %s(?:: (.*))?$" % state)
             since = self._telemetry.reply_marker()            # taken before publishing: a fast reply is not missed
-            info = self._client.publish(config.TOPIC_CMD_STATE, state, qos=1, retain=False)
+            # QoS 0 on purpose: paho queues a QoS 1 message it cannot send (no connection yet, or no PUBACK before a
+            # drop) and replays it after reconnecting, so a command reported as failed could still be carried out
+            # later: an A would open the pilot and stop the charger. QoS 0 is dropped instead, and the page waits for
+            # the board's own reply, which is the confirmation that matters.
+            info = self._client.publish(config.TOPIC_CMD_STATE, state, qos=0, retain=False)
             if info.rc != 0:
                 raise CommandError(503, "The command could not be sent.")
             reply = self._telemetry.wait_reply(

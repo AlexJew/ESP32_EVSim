@@ -1,9 +1,11 @@
+import importlib.util
 import threading
 import unittest
 
 from fake_mqtt import FakeMqttClient
+from charger_web import config
 from charger_web.commands import CommandError, StateCommander
-from charger_web.telemetry import Telemetry
+from charger_web.telemetry import Telemetry, build_client
 
 
 class CommanderTest(unittest.TestCase):
@@ -28,7 +30,9 @@ class CommanderTest(unittest.TestCase):
     def test_an_accepted_command_publishes_the_letter_and_returns_the_reply(self):
         self.answer_with("state C -> B")
         self.assertEqual(self.commander.set_state("B"), {"success": True, "state": "B", "reply": "state C -> B"})
-        self.assertEqual(self.client.published, [("evsim/cmd/state", "B", 1, False)])    # QoS 1, not retained
+        # QoS 0 and not retained: paho queues a QoS 1 message it cannot send and replays it after a reconnect, so a
+        # command shown as "Not validated" could still be carried out later (an A opens the pilot and stops the charger)
+        self.assertEqual(self.client.published, [("evsim/cmd/state", "B", 0, False)])
 
     def test_already_in_the_requested_state_is_accepted_too(self):
         self.answer_with("already in B")
@@ -99,6 +103,22 @@ class CommanderTest(unittest.TestCase):
         self.assertEqual(self.error_of("C").status, 409)
         self.answer_with("state A -> B")
         self.assertTrue(self.commander.set_state("B")["success"])
+
+
+@unittest.skipUnless(importlib.util.find_spec("paho"), "paho-mqtt is not installed")
+class RealPahoTest(unittest.TestCase):
+    """The fake client cannot show what the real one does with a message it cannot send."""
+
+    def test_an_unsent_command_is_not_queued_for_a_later_reconnect(self):
+        client = build_client()
+        info = client.publish(config.TOPIC_CMD_STATE, "A", qos=0, retain=False)
+        self.assertNotEqual(info.rc, 0)                    # not connected: refused
+        self.assertEqual(len(client._out_messages), 0)     # and nothing is left to be replayed
+
+    def test_a_qos_1_command_would_have_been_queued(self):
+        client = build_client()
+        client.publish(config.TOPIC_CMD_STATE, "A", qos=1, retain=False)
+        self.assertEqual(len(client._out_messages), 1)     # the reason the commander must not use QoS 1
 
 
 if __name__ == "__main__":

@@ -195,8 +195,11 @@ async function sendState(letter) {
     const result = await response.json();
     if (!response.ok || !result.success) throw new Error(result.error || "The board did not accept the command.");
     setStatus("ok", "Validated");
+    dashboardState.expected = { letter, until: Date.now() + 3000 };
+    stateSelect.value = letter;
   } catch (error) {
     setStatus("error", "Not validated", error.message);
+    dashboardState.expected = null;
     stateSelect.value = dashboardState.boardState || "";      // back to what the board presents
   } finally {
     dashboardState.stateBusy = false;

@@ -28,6 +28,9 @@ global.fetch = (url, options) => {
   if (url === "/api/telemetry") return respond(true, 200, scenario.telemetry);
   return Promise.reject(new Error("not served in this test: " + url));
 };
+let skew = 0;                                   // ["advance", ms] moves the page's clock forward
+const realNow = Date.now;
+Date.now = () => realNow() + skew;
 const code = ["chart.js", "dashboard.js", "app.js"].map((name) => fs.readFileSync(process.argv[1] + "/" + name, "utf8")).join("\n");
 eval(code + "\nglobalThis.page = { pollTelemetry };");
 const select = document.getElementById("vehicle-state");
@@ -44,6 +47,7 @@ const snapshot = () => {
     if (kind === "select") { select.value = value; select.listeners.change(); }
     if (kind === "telemetry") { scenario.telemetry = value; page.pollTelemetry(); }
     if (kind === "wait") await wait(value);
+    if (kind === "advance") skew += value;
     log.push(snapshot());
   }
   console.log(JSON.stringify(log));
@@ -129,6 +133,25 @@ class StateDropdownTest(unittest.TestCase):
         last = run([("select", "A"), ("wait", 60)], post=NO_ANSWER)[-1]
         self.assertEqual((last["pill"]["text"], last["select"]["value"]), ("Not validated", "C"))
         self.assertIn("did not answer", last["pill"]["title"])
+
+    def test_right_after_validated_the_dropdown_keeps_the_accepted_letter_while_the_board_still_reports_the_old_one(self):
+        log = run([("select", "B"), ("wait", 60), ("telemetry", telemetry("C")), ("wait", 40)])
+        self.assertEqual(log[2]["pill"]["text"], "Validated")
+        self.assertEqual(log[2]["select"], {"value": "B", "disabled": False})
+        self.assertEqual(log[-1]["select"], {"value": "B", "disabled": False})       # a lagging poll does not undo it
+
+    def test_the_expected_letter_is_dropped_once_the_board_reports_it(self):
+        log = run([("select", "B"), ("wait", 60), ("telemetry", telemetry("B")), ("wait", 40),
+                   ("telemetry", telemetry("A")), ("wait", 40)])
+        self.assertEqual(log[-1]["select"], {"value": "A", "disabled": False})       # later changes follow the board again
+
+    def test_if_the_board_never_reports_it_the_dropdown_returns_to_the_boards_state_after_3_seconds(self):
+        log = run([("select", "B"), ("wait", 60), ("advance", 3500), ("telemetry", telemetry("C")), ("wait", 40)])
+        self.assertEqual(log[-1]["select"], {"value": "C", "disabled": False})
+
+    def test_a_refused_command_leaves_no_expected_letter_behind(self):
+        log = run([("select", "B"), ("wait", 60), ("telemetry", telemetry("C")), ("wait", 40)], post=REFUSED)
+        self.assertEqual(log[-1]["select"], {"value": "C", "disabled": False})
 
     def test_after_an_accepted_command_the_next_poll_shows_the_new_state(self):
         log = run([("select", "B"), ("wait", 60), ("telemetry", telemetry("B")), ("wait", 40)])

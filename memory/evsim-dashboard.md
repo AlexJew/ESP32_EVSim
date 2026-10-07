@@ -45,6 +45,6 @@ Spec `docs/superpowers/specs/2026-10-07-evsim-measurements-and-state-control-des
   `ac_a`, `ac_v` (AC values are the mean of the three phases); the page still never reads the inverter.
 - **History frames** carry all of them (`charger_w/a/v`, `sig_a`, `dc_a/v`, `ac_w/a/v`), so the power, current and
   voltage charts all draw the server's 10 minutes.
-- **The page now publishes once:** `POST /api/vehicle/state` sends A, B or C to `evsim/cmd/state` (QoS 1, not retained)
+- **The page now publishes once:** `POST /api/vehicle/state` sends A, B or C to `evsim/cmd/state` (QoS 0, not retained: paho queues QoS 1 and replays it after a reconnect, so a command shown as failed could run later)
   and waits 3 s for the matching line on `evsim/reply`. Replies have no command id, so they are matched by content; one
   command at a time (409 otherwise). "Validated" = the board accepted; the charger is not waited for.

@@ -48,7 +48,7 @@ class VehicleRouteTest(unittest.TestCase):
         self.answer_with("state C -> B")
         status, body = self.post({"state": "B"})
         self.assertEqual((status, body), (200, {"success": True, "state": "B", "reply": "state C -> B"}))
-        self.assertEqual(self.client.published, [("evsim/cmd/state", "B", 1, False)])
+        self.assertEqual(self.client.published, [("evsim/cmd/state", "B", 0, False)])
 
     def test_a_refusal_is_a_409_with_the_reason(self):
         self.answer_with("refused A -> C: state B must be asserted first")

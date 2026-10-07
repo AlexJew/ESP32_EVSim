@@ -35,7 +35,7 @@ grid. There is no battery.
 |---|---|
 | `EVSim/` | ESP32 firmware (PlatformIO, Arduino framework): CP measurement, pilot-state control, WiFi, MQTT |
 | `server/setpoint_server/` | The setpoint server (Python): MQTT averaging and the Fronius writer |
-| `server/charger_web/` | The local page (Python): Modbus TCP to the AMTRON, plus a read-only dashboard from MQTT (`paho-mqtt`) |
+| `server/charger_web/` | The local page (Python): Modbus TCP to the AMTRON, plus a dashboard from MQTT (`paho-mqtt`) that can command the board's pilot state |
 | `server/tests/` | Tests for both servers, with fake chargers and inverters |
 | `tools/` | Scripts: Mosquitto config, Fronius and AMTRON Modbus tools, charger and jitter loggers |
 | `data/` | Calibration and measurement logs |
@@ -108,7 +108,7 @@ Open <http://127.0.0.1:8080/>. It binds to loopback only. `EVSIM_CHARGER_HOST` o
 `--port` the page's port. While it runs it also keeps the charger alive: after 30 s without Modbus traffic the AMTRON
 drops to 0 A.
 
-Below the charger controls the page shows, read-only, the board's `evsim/cp`, the setpoint topic (`EVSIM_SETPOINT_TOPIC`),
+Below the charger controls the page shows the board's `evsim/cp`, the setpoint topic (`EVSIM_SETPOINT_TOPIC`),
 the server's DC target and the inverter's DC power, with a 10-minute chart. The DC target and DC power come from
 `evsim/inverter`, so they appear only while the setpoint server runs with `--inverter`. `EVSIM_MQTT_HOST` changes the
 broker. See `server/README.md`.

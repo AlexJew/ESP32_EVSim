@@ -117,3 +117,15 @@ footer { align-items: center; color: var(--muted); font-size: .79rem; margin-top
 }
 
 .unit-select:disabled { cursor: not-allowed; opacity: .5; }
+
+/* Both dropdowns (vehicle state, chart quantity): the browser's own arrow hugs the right edge of the rounded box, so
+   it is replaced by one drawn from two CSS gradients (no image: the page only loads its own files), 16 px in. */
+.unit-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 44px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 28px) 50%, calc(100% - 22px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}

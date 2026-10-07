@@ -83,6 +83,23 @@ class PageTest(unittest.TestCase):
         self.assertIn("disabled", block.split(">")[0])                   # off until the board's state is known
         self.assertNotIn("stepper", html)
 
+    def test_both_dropdowns_draw_their_own_arrow_with_room_before_the_edge(self):
+        # the browser's native arrow hugs the right edge of the rounded box; the style sheet draws one instead.
+        # No image is used: the page's security policy only allows its own files, so the arrow is two CSS gradients.
+        css = (STATIC / "app.css").read_text(encoding="utf-8")
+        rules = re.findall(r"\.unit-select\s*\{([^}]*)\}", css)
+        joined = " ".join(rules)
+        self.assertIn("appearance: none", joined)
+        self.assertEqual(len(re.findall(r"linear-gradient", joined)), 2)
+        self.assertNotIn("url(", joined)
+        gap = re.search(r"background-position:\s*calc\(100% - (\d+)px\)[^;]*calc\(100% - (\d+)px\)", joined)
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(min(int(gap.group(1)), int(gap.group(2))) - 6, 12)     # at least 12 px between arrow and edge
+        padding = re.search(r"padding-right:\s*(\d+)px", joined)
+        self.assertGreaterEqual(int(padding.group(1)), int(gap.group(1)) + 6)         # the text never runs under the arrow
+        classes = [attrs.get("class") for tag, attrs in parsed_page().tags if tag == "select"]
+        self.assertEqual(classes, ["unit-select", "unit-select"])                     # the state and the chart dropdowns
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')

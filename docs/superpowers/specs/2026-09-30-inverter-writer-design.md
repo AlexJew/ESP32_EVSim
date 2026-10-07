@@ -138,7 +138,7 @@ Topic `evsim/inverter`, QoS 0, not retained, once per second, so the actual draw
 setpoint:
 
 ```json
-{"mode":"capped","target_dc_w":7000,"cap_ac_w":6791,"dc_w":7012,"ac_w":6788,"inverter_state":4,"error":null,"ts":"2026-09-30T13:42:07Z"}
+{"mode":"capped","target_dc_w":7000,"cap_ac_w":6791,"dc_w":7012,"dc_a":13.6,"dc_v":515.0,"ac_w":6788,"ac_a":9.9,"ac_v":233.3,"inverter_state":4,"error":null,"ts":"2026-09-30T13:42:07Z"}
 ```
 
 | Field | Meaning |
@@ -147,6 +147,8 @@ setpoint:
 | `target_dc_w` | The last written target, or `null` |
 | `cap_ac_w` | The AC cap currently written, or `null` |
 | `dc_w`, `ac_w` | The inverter's measured MPPT 1 DC power and AC power, or `null` if unreadable |
+| `dc_a`, `dc_v` | MPPT 1's DC current and voltage, or `null` (added 2026-10-07) |
+| `ac_a`, `ac_v` | The mean of the three AC phase currents and of the three phase-to-neutral voltages, or `null` (added 2026-10-07) |
 | `inverter_state` | The SunSpec state (4 = MPPT, 8 = STANDBY, 3 = STARTING, 1 = OFF), or `null` |
 | `error` | The last error text, or `null` |
 | `ts` | Server UTC time, ISO 8601 |

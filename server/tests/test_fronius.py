@@ -93,6 +93,23 @@ class ReadTest(Base):
         self.fake.put(M103 + 12, [0x8000])
         self.assertIsNone(self.inv.power()["ac_w"])
 
+    def test_power_reads_the_mean_ac_current_and_voltage_of_the_phases(self):
+        self.fake.put(M103 + 1, [5976, 5976, 5977, 65533])        # AphA, AphB, AphC, A_SF = -3
+        self.fake.put(M103 + 8, [2329, 2331, 2338, 65535])        # PhVphA, PhVphB, PhVphC, V_SF = -1
+        p = self.inv.power()
+        self.assertAlmostEqual(p["ac_a"], 5.97633, places=4)
+        self.assertAlmostEqual(p["ac_v"], 233.2667, places=3)
+
+    def test_a_phase_that_is_not_implemented_is_left_out_of_the_mean(self):
+        self.fake.put(M103 + 1, [5000, 65535, 7000, 65533])
+        self.assertAlmostEqual(self.inv.power()["ac_a"], 6.0)
+
+    def test_no_phase_or_no_scale_factor_gives_none(self):
+        self.fake.put(M103 + 1, [65535, 65535, 65535, 65533])
+        self.assertIsNone(self.inv.power()["ac_a"])
+        self.fake.put(M103 + 8, [2329, 2331, 2338, 0x8000])
+        self.assertIsNone(self.inv.power()["ac_v"])
+
     def test_scale_factors_are_re_read_every_time(self):
         self.assertEqual(self.inv.power()["mppt"][0]["dc_w"], 7272)
         # the inverter changes the DC power scale factor at run time (seen at start-up)

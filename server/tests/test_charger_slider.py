@@ -41,6 +41,7 @@ const snapshot = () => {
     posts: posts.slice(), slider: slider.value, sliderMax: slider.max, limit: text("limit-value"),
     pill: { text: pill.textContent, kind: pill.dataset.kind, title: pill.title },
     state: text("vehicle-state"), signalled: text("signalled-current"), charger: text("meter-charger"),
+    signalledStatus: document.getElementById("signalled-current").dataset.status,
     installation: text("installation-limit"), warning: { hidden: warning.hidden, text: warning.textContent },
     ticks: { min: text("tick-min"), max: text("tick-max"), mid: text("tick-mid"), midHidden: document.getElementById("tick-mid").hidden },
   };
@@ -103,6 +104,12 @@ class SliderTest(unittest.TestCase):
         self.assertEqual((first["signalled"], first["charger"]), ("10 A", "11.8 A / 232 V / 600 W"))   # means of the phases
         self.assertEqual(first["installation"], "Installation limit: 16 A")
         self.assertEqual(first["posts"], [])
+
+    def test_a_stale_signalled_current_keeps_its_value_dimmed_instead_of_a_dash(self):
+        stale = status_with(signalled_current_a={"value": 10, "status": "stale", "updated_at": None})
+        first = run([], stale)[0]
+        self.assertEqual((first["signalled"], first["signalledStatus"]), ("10 A", "stale"))
+        self.assertEqual(run([])[0]["signalledStatus"], "ok")                      # and black again once current
 
     def test_the_ticks_mark_the_ends_and_the_current_value(self):
         first = run([])[0]

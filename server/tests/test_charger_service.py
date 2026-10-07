@@ -368,6 +368,68 @@ class RestoreTest(ServiceTest):
         self.assertFalse(self.service.status()["paused"])
 
 
+class SignalledAfterApplyTest(ServiceTest):
+    """After an Apply the signalled current (706) follows with a delay: the old value stays on screen, dimmed (stale),
+    until the page has read a new one, instead of being replaced by a dash."""
+
+    def apply_slowly(self, value):
+        self.service.poll_once()
+        self.fake.ignore_signal_updates = True               # the real unit takes about 3 s to follow
+        self.service.set_limit(value)
+
+    def signalled(self):
+        return self.service.status()["signalled_current_a"]
+
+    def test_the_old_value_stays_but_is_stale_right_after_an_apply(self):
+        self.apply_slowly(12)
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (10, "stale"))
+
+    def test_a_changed_reading_makes_it_current_again(self):
+        self.apply_slowly(12)
+        self.fake.ignore_signal_updates = False
+        self.fake.regs[706] = 12
+        self.service.poll_once()
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (12, "ok"))
+
+    def test_a_poll_that_still_reads_the_old_value_keeps_it_stale(self):
+        self.apply_slowly(12)
+        self.clock.t += 2
+        self.service.poll_once()
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (10, "stale"))
+
+    def test_a_value_that_never_changes_turns_current_after_the_settle_time(self):
+        self.apply_slowly(12)                                   # e.g. the operator limit caps it: it stays 10
+        self.clock.t += config.SIGNALLED_SETTLE_S - 0.1
+        self.service.poll_once()
+        self.assertEqual(self.signalled()["status"], "stale")
+        self.clock.t += 0.2
+        self.service.poll_once()
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (10, "ok"))
+
+    def test_the_paused_warning_still_waits_while_the_old_zero_is_stale(self):
+        self.fake.regs[1000] = 0
+        self.fake.regs[706] = 0
+        self.apply_slowly(10)
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (0, "stale"))
+        self.assertFalse(self.service.status()["paused"])
+
+    def test_a_failed_poll_does_not_make_the_stale_value_current(self):
+        self.apply_slowly(12)
+        self.fake.stop()
+        self.service.poll_once()
+        self.assertEqual(self.signalled()["status"], "stale")
+
+    def test_with_no_value_ever_read_it_stays_unavailable(self):
+        self.service.set_limit(12)                              # no poll before: nothing to keep
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (None, "unavailable"))
+
+    def test_a_change_the_operator_makes_on_the_charger_needs_no_stale_phase(self):
+        self.service.poll_once()
+        self.fake.regs[706] = 8                                 # nobody pressed Apply here
+        self.service.poll_once()
+        self.assertEqual((self.signalled()["value"], self.signalled()["status"]), (8, "ok"))
+
+
 class RegisterMapSafetyTest(unittest.TestCase):
     def _map(self, address):
         m = load_map()

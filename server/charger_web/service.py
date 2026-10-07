@@ -59,6 +59,7 @@ class ChargerService:
         self._last_ok = None
         self._error = None
         self._desired = None
+        self._signalled_wait = None     # after an Apply: {"before": old signalled current, "since": time}
         self._restored_at = None
         self._restore_attempt_at = None
         self._stop = threading.Event()
@@ -96,6 +97,10 @@ class ChargerService:
                 for name, value in values.items():
                     self._values[name] = value
                     self._at[name] = None if value is None else now
+                wait, signalled = self._signalled_wait, values.get("signalled_current_a")
+                if error is None and wait is not None and signalled is not None \
+                        and (signalled != wait["before"] or now - wait["since"] >= config.SIGNALLED_SETTLE_S):
+                    self._signalled_wait = None     # a new value has been read, or it is simply not going to change
             if error is None:
                 self._restore_if_needed(now)
 
@@ -128,9 +133,14 @@ class ChargerService:
             link = self._link(now)
             values, at = dict(self._values), dict(self._at)
             desired, restored_at, error = self._desired, self._restored_at, self._error
+            signalled_wait = self._signalled_wait
 
             def reading(name, value=None):
                 return self._reading(values[name] if value is None else value, at[name], link, now)
+
+            signalled_reading = reading("signalled_current_a")
+            if signalled_wait is not None and signalled_reading["value"] is not None:
+                signalled_reading["status"] = "stale"       # the old value, shown dimmed until a new one has been read
 
             phases = {phase: values[name] for phase, name in PHASES if values[name] is not None}
             meter_at = min((at[name] for phase, name in PHASES if values[name] is not None), default=None)
@@ -147,13 +157,13 @@ class ChargerService:
                 "set_limit_a": reading("set_limit_a"),
                 "operator_limit_a": reading("operator_limit_a"),
                 "installation_limit_a": reading("installation_limit_a"),
-                "signalled_current_a": reading("signalled_current_a"),
+                "signalled_current_a": signalled_reading,
                 "meter_current_a": self._reading(phases or None, meter_at, link, now),
                 "meter_voltage_v": self._reading(volts or None, volts_at, link, now),
                 "meter_power_w": reading("meter_power_w"),
                 "vehicle_state": self._reading(state_text, at["vehicle_state"], link, now),
                 "charger_status": self._reading(status_text, at["charger_status"], link, now),
-                "paused": bool(set_limit and signalled == 0),
+                "paused": bool(set_limit and signalled == 0 and signalled_wait is None),
                 "operator_below_set": bool(set_limit and operator is not None and operator < set_limit),
                 "desired_limit_a": desired,
                 "restored_at": self._timestamp(restored_at),
@@ -216,8 +226,9 @@ class ChargerService:
             now = self._clock()
             with self._cache_lock:
                 self._values["set_limit_a"], self._at["set_limit_a"] = confirmed, now
-                # the signalled current (706) follows the limit with a delay: do not show a stale 0 as "paused"
-                self._values["signalled_current_a"], self._at["signalled_current_a"] = None, None
+                # The signalled current (706) follows the limit with a delay. Keep the old value, shown stale, until a
+                # poll reads a new one (see poll_once); until then an old 0 must not count as "paused".
+                self._signalled_wait = {"before": self._values["signalled_current_a"], "since": now}
                 self._desired = value
         return {"success": True, "set_limit_a": confirmed, "updated_at": self._timestamp(now)}
 

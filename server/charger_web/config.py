@@ -13,6 +13,7 @@ POLL_PERIOD_S = 2                 # the poller reads this often; it is also the 
 STALE_AFTER_S = 5                 # a reading older than this, or polls failing this long, is stale
 FALLBACK_AFTER_S = 30             # no Modbus traffic for this long: the charger drops to its safe current
 RESTORE_MIN_INTERVAL_S = 10       # the desired limit is re-written at most this often
+SIGNALLED_SETTLE_S = 6            # after an Apply the old signalled current stays stale this long if it never changes
 MIN_LIMIT_A = 6                   # the lowest non-zero limit the page accepts
 MAX_LIMIT_A = 16                  # the highest limit the page accepts
 

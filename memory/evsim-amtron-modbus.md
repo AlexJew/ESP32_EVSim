@@ -34,3 +34,11 @@ The map is MENNEKES's published ECU Modbus TCP specification, rev 1.07, which na
 fought over it. Modbus has no login. It is also unauthenticated, so anything on the lab network can set the current.
 
 Related: [[evsim-amtron-interfaces]], [[evsim-amtron-rest-api]], [[evsim-inverter-fronius]].
+
+## Meter registers found 2026-10-07 (inferred from the values)
+
+Read-only scan of 200 to 235: **220-221 total active power (W)**; **222, 224, 226 phase voltages (V)**; **206, 208, 210
+phase powers (W)**; 212, 214, 216 phase currents (mA, already used). All 32-bit, high word first. Checked by arithmetic,
+not against the specification text: the phase powers summed to 8 243 W against a total of 8 245 W, and current times
+voltage gave 2 734 W per phase against 2 737 W. 200-201 and 218-219 both held 309 893 (an energy counter, unit not
+confirmed). The page reads 220 and 222-226.

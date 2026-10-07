@@ -74,6 +74,15 @@ The same page shows the whole chain. Nothing in it can write to the inverter or 
 - **The chart** keeps the last 10 minutes in memory (a restart empties it): the board's raw setpoint (the mean of the
   5 Hz samples in each second), the 1 s average, the DC target and the inverter's DC power. A value that is stale or
   missing leaves a gap. Click a legend entry to hide or show a line.
+- **Measurements:** the Car charger, DC input and AC output rows each read "current / voltage / power". The charger's
+  values come from the AMTRON's meter (current and voltage are the mean of the three phases; total power from register
+  220). The inverter's come from `evsim/inverter`: `dc_a`, `dc_v`, `dc_w` (MPPT 1) and `ac_a`, `ac_v` (means of the
+  three phases), `ac_w`. A setpoint server older than 2026-10-07 does not publish the currents and voltages: they show
+  dashes. The chart switches between Power, Current and Voltage; all three draw the same server-side history.
+- **Vehicle state:** the dropdown shows the state the board presents and, when you pick A, B or C, publishes it to
+  `evsim/cmd/state` and waits up to 3 s for the board's answer on `evsim/reply`. "Validated" means the board accepted it;
+  "Not validated" gives the board's reason (for example A to C is refused until B). This is the page's only write to
+  MQTT. Going to A opens the pilot: the charger stops and the inverter loses its DC input for about two minutes.
 - Each source fails alone: with the broker down the charger part still works, and the reverse.
 
 Design: `docs/superpowers/specs/2026-10-01-evsim-dashboard-design.md`.

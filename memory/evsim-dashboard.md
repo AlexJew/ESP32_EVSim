@@ -34,3 +34,17 @@ AMTRON offering about 8 A. Nothing was written to the inverter or the broker.
 - **Not checked live:** the rendering in a browser (chart, legend clicks, greyed cards) and the setpoint server being
   stopped while the page runs (it would have left the inverter at a 0 % cap); both are covered by unit tests only.
 - The old page on port 8080 was left running; it is the pre-dashboard code until restarted.
+
+## Measurements and state control (2026-10-07)
+
+Spec `docs/superpowers/specs/2026-10-07-evsim-measurements-and-state-control-design.md`, plan
+`docs/superpowers/plans/2026-10-07-evsim-measurements-and-state-control.md`.
+
+- **Every measurement is A / V / W.** Charger: mean of the three phase currents (212, 214, 216) and voltages (222, 224,
+  226), total power from 220 (see [[evsim-amtron-modbus]]). Inverter: `evsim/inverter` now also carries `dc_a`, `dc_v`,
+  `ac_a`, `ac_v` (AC values are the mean of the three phases); the page still never reads the inverter.
+- **History frames** carry all of them (`charger_w/a/v`, `sig_a`, `dc_a/v`, `ac_w/a/v`), so the power, current and
+  voltage charts all draw the server's 10 minutes.
+- **The page now publishes once:** `POST /api/vehicle/state` sends A, B or C to `evsim/cmd/state` (QoS 1, not retained)
+  and waits 3 s for the matching line on `evsim/reply`. Replies have no command id, so they are matched by content; one
+  command at a time (409 otherwise). "Validated" = the board accepted; the charger is not waited for.

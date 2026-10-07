@@ -110,6 +110,12 @@ class PageTest(unittest.TestCase):
         self.assertLess(html.index('id="measurements-title"'), html.index('id="part-A"'))
         self.assertLess(html.index('id="part-W"'), html.index('id="meter-charger"'))
 
+    def test_the_chart_has_no_last_10_minutes_title_the_time_axis_says_it(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("Last 10 minutes", html)
+        self.assertIn('id="chart-title"', html)                          # the section keeps its (hidden) accessible name
+        self.assertIn("ten minutes", html)                               # and the canvas description still says it
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')

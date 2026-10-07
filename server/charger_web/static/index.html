@@ -76,9 +76,13 @@
               <option value="V">Voltage [V]</option>
             </select>
           </div>
-          <span id="chart-note" class="ceiling">Waiting for history</span>
+          <div class="chart-status">
+            <span id="chart-note" class="ceiling">Waiting for history</span>
+            <span id="chart-view" class="ceiling" hidden></span>
+            <button id="chart-live" class="text-button" type="button" hidden>Back to live</button>
+          </div>
         </div>
-        <canvas id="chart" role="img" aria-label="Line chart of the selected quantity over the last ten minutes"></canvas>
+        <canvas id="chart" title="Scroll or pinch to zoom the time axis, drag to pan, double-click to go back to live" role="img" aria-label="Line chart of the selected quantity over the last ten minutes"></canvas>
         <div id="legend" class="legend"></div>
       </section>
 
@@ -90,7 +94,6 @@
             <div class="row"><dt>Board setpoint</dt><dd id="board-setpoint">—</dd></div>
             <div class="row"><dt>EV setpoint</dt><dd id="setpoint-value">—</dd></div>
           </dl>
-          <p id="setpoints-updated" class="updated">Waiting for data</p>
         </section>
 
         <section class="panel list-panel" aria-labelledby="measurements-title">
@@ -107,7 +110,6 @@
             <div class="row"><dt>DC input</dt><dd id="inverter-dc">—</dd></div>
             <div class="row"><dt>AC output</dt><dd id="inverter-ac">—</dd></div>
           </dl>
-          <p id="measurements-updated" class="updated">Waiting for data</p>
         </section>
       </div>
     </div>

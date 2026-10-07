@@ -70,3 +70,11 @@ Page on port 8081 against the real broker, board, AMTRON and inverter, with the 
   adds a random suffix to its client id; with the old page still running, 0 disconnects. Test: two clients never share an id.
 - **Not checked:** the page in a browser (dropdown, rows, three chart quantities); a refusal such as A to C (it needs state A,
   which was never commanded).
+
+## Chart zoom (2026-10-07, ported onto the new layout)
+
+Wheel or pinch zooms the time axis around the cursor (20 s to 10 min), drag pans, double-click or "Back to live" resets; a
+zoomed view is frozen on absolute times (`dashboardState.zoom`, `chart.js` `zoomView`/`panView`/`clampView`/`timeTicks`).
+Only the zoomed chart changes: clock-time ticks, a vertical scale that follows what is in view, clipping and a marker on
+each 1 s frame when 60 s or narrower. The chart that is not zoomed is drawn exactly as before (tests pin it). Frames stay
+1 Hz, so delays read to about 1 s. The first version, on the old layout, was branch `feat/chart-zoom`.

@@ -27,6 +27,9 @@ const VOLT_SERIES = [
   { id: "ac", key: "ac_v", label: "AC output", color: "#7b4fa3" },
 ];
 const WINDOW_S = 600;
+const MIN_SPAN_S = 20;      // the furthest the chart zooms in
+const MARKER_SPAN_S = 60;   // zoomed to this span or narrower, every 1 s frame gets a marker
+const PLOT = { left: 58, right: 12, top: 12, bottom: 28 };   // margins around the plot, in CSS pixels
 const MAX_GAP_S = 2.5;      // frames come once a second; a longer silence is a gap, not a slope
 const GRID = "#dce4df";
 const MUTED = "#69766f";
@@ -71,7 +74,53 @@ function axisVolts(value) {
   return { top: Math.max(300, Math.ceil(value / 100) * 100), step: 100 };
 }
 
-function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
+// A zoom is {from, to}, in epoch seconds, or null: the whole window, the last WINDOW_S ending at nowS (follow live).
+// clampView keeps a zoom of 20 s to 10 min inside the history [nowS - WINDOW_S, nowS]; a frozen zoom that has scrolled
+// out of the history is pinned to its oldest edge.
+function clampView(zoom, nowS) {
+  const span = Math.min(WINDOW_S, Math.max(MIN_SPAN_S, zoom.to - zoom.from));
+  let from = Math.max(zoom.from, nowS - WINDOW_S);
+  if (from + span > nowS) from = nowS - span;
+  return { from, to: from + span };
+}
+
+// Zoom around `anchor` (an epoch second) by `factor` (below 1 zooms in); the anchor keeps its place on screen.
+// Returns the new zoom, or null once the whole window is shown again (follow live).
+function zoomView(zoom, anchor, factor, nowS) {
+  const current = zoom || { from: nowS - WINDOW_S, to: nowS };
+  const span = Math.min(WINDOW_S, Math.max(MIN_SPAN_S, (current.to - current.from) * factor));
+  if (span >= WINDOW_S) return null;
+  const ratio = (anchor - current.from) / (current.to - current.from);
+  const from = anchor - ratio * span;
+  return clampView({ from, to: from + span }, nowS);
+}
+
+// Move a zoomed window by `dtS` seconds (positive: later). The whole window cannot move.
+function panView(zoom, dtS, nowS) {
+  if (zoom === null) return null;
+  return clampView({ from: zoom.from + dtS, to: zoom.to + dtS }, nowS);
+}
+
+// Round-numbered time ticks for a zoomed span: about six of them, on multiples of the step.
+function timeTicks(from, to) {
+  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  const target = (to - from) / 6;
+  const step = steps.find((candidate) => candidate >= target) || 600;
+  const ticks = [];
+  for (let t = Math.ceil(from / step) * step; t <= to; t += step) ticks.push(t);
+  return { step, ticks };
+}
+
+function clockLabel(t, step) {
+  const date = new Date(t * 1000);
+  const two = (n) => String(n).padStart(2, "0");
+  const hm = `${two(date.getHours())}:${two(date.getMinutes())}`;
+  return step < 60 ? `${hm}:${two(date.getSeconds())}` : hm;
+}
+
+// `zoom` is null for the whole 10-minute window, drawn exactly as before; a zoom adds clock-time ticks, a vertical scale
+// that follows what is in view, markers on the 1 s frames when narrow, and clips the lines to the plot.
+function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW, zoom = null) {
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 860;
   const height = canvas.clientHeight || 300;
@@ -81,19 +130,21 @@ function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  const left = 58, right = 12, top = 12, bottom = 28;
+  const { left, right, top, bottom } = PLOT;
   const plotW = width - left - right;
   const plotH = height - top - bottom;
-  const tMin = nowS - WINDOW_S;
+  const range = zoom ? clampView(zoom, nowS) : { from: nowS - WINDOW_S, to: nowS };
+  const span = range.to - range.from;
+  const shown = zoom ? frames.filter((frame) => frame.t >= range.from - 1 && frame.t <= range.to + 1) : frames;
   let highest = 0;
   for (const series of view.series) {
     if (!visible.has(seriesId(series))) continue;
-    for (const frame of frames) {
+    for (const frame of shown) {
       if (typeof frame[series.key] === "number" && frame[series.key] > highest) highest = frame[series.key];
     }
   }
   const scale = ({ W: axis, A: axisAmps, V: axisVolts }[view.unit] || axis)(highest);
-  const x = (t) => left + ((t - tMin) / WINDOW_S) * plotW;
+  const x = (t) => left + ((t - range.from) / span) * plotW;
   const y = (v) => top + plotH - (v / scale.top) * plotH;
 
   ctx.font = "12px system-ui, sans-serif";
@@ -110,18 +161,39 @@ function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
     ctx.fillText(`${v} ${view.unit}`, left - 8, y(v));
   }
   ctx.textBaseline = "top";
-  for (const [seconds, label, align] of [[-WINDOW_S, "−10 min", "left"], [-WINDOW_S / 2, "−5 min", "center"], [0, "now", "right"]]) {
-    ctx.textAlign = align;
-    ctx.fillText(label, x(nowS + seconds), top + plotH + 8);
+  if (zoom) {
+    const { step, ticks } = timeTicks(range.from, range.to);
+    for (const t of ticks) {
+      const tx = x(t);
+      ctx.strokeStyle = GRID;
+      ctx.beginPath();
+      ctx.moveTo(tx, top);
+      ctx.lineTo(tx, top + plotH);
+      ctx.stroke();
+      ctx.fillStyle = MUTED;
+      ctx.textAlign = tx < left + 24 ? "left" : tx > left + plotW - 24 ? "right" : "center";
+      ctx.fillText(clockLabel(t, step), tx, top + plotH + 8);
+    }
+  } else {
+    for (const [seconds, label, align] of [[-WINDOW_S, "−10 min", "left"], [-WINDOW_S / 2, "−5 min", "center"], [0, "now", "right"]]) {
+      ctx.textAlign = align;
+      ctx.fillText(label, x(nowS + seconds), top + plotH + 8);
+    }
   }
 
+  if (zoom) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, plotW, plotH);
+    ctx.clip();                                   // zoomed-in lines must not spill into the margins
+  }
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   for (const series of view.series) {
     if (!visible.has(seriesId(series))) continue;
     ctx.strokeStyle = series.color;
     ctx.fillStyle = series.color;
-    for (const run of segments(frames, series.key, view.maxGapS)) {
+    for (const run of segments(shown, series.key, view.maxGapS)) {
       if (run.length === 1) {
         ctx.beginPath();
         ctx.arc(x(run[0][0]), y(run[0][1]), 2, 0, 2 * Math.PI);
@@ -131,10 +203,19 @@ function drawChart(canvas, frames, visible, nowS, view = POWER_VIEW) {
       ctx.beginPath();
       run.forEach(([t, v], index) => (index === 0 ? ctx.moveTo(x(t), y(v)) : ctx.lineTo(x(t), y(v))));
       ctx.stroke();
+      if (zoom && span <= MARKER_SPAN_S) {        // the 1 s sampling made visible
+        for (const [t, v] of run) {
+          ctx.beginPath();
+          ctx.arc(x(t), y(v), 2.5, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
     }
   }
+  if (zoom) ctx.restore();
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SERIES, POWER_SERIES, CURRENT_SERIES, VOLT_SERIES, segments, axis, axisAmps, axisVolts };
+  module.exports = { SERIES, POWER_SERIES, CURRENT_SERIES, VOLT_SERIES, WINDOW_S, MIN_SPAN_S, segments, axis, axisAmps,
+                     axisVolts, clampView, zoomView, panView, timeTicks };
 }

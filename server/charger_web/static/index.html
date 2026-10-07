@@ -13,116 +13,103 @@
   <main class="page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">EVSim <span aria-hidden="true">/</span> local control</p>
         <h1>EVSim</h1>
         <p class="subheading">Charger, setpoint and inverter, live</p>
       </div>
-      <span id="connection" class="connection" data-state="loading">Connecting…</span>
+      <div class="badges">
+        <span id="connection" class="connection" data-state="loading">Connecting…</span>
+        <span id="mqtt-state" class="connection" data-state="loading">Broker …</span>
+      </div>
     </header>
 
     <p id="banner" class="banner" role="status" hidden></p>
 
-    <section class="panel limit-panel" aria-labelledby="limit-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">AMTRON charger · setting</p>
-          <h2 id="limit-title">Maximum current</h2>
-        </div>
-        <span id="installation-limit" class="ceiling">Installation limit: —</span>
-      </div>
-      <form id="limit-form">
-        <label for="current-limit">Set maximum current</label>
-        <div class="control-row">
-          <div class="input-wrap">
-            <input id="current-limit" name="current_limit_a" type="number" inputmode="numeric" step="1" min="0" max="16" value="0" required>
-            <span aria-hidden="true">A</span>
+    <section class="panel controls" aria-label="Controls">
+      <div class="state-block">
+        <p class="eyebrow">Car charger state</p>
+        <div class="state-row">
+          <span class="control-label">State</span>
+          <div class="stepper">
+            <output id="vehicle-state" class="stepper-value">—</output>
+            <div class="stepper-buttons">
+              <!-- The state cannot be set from this page yet: the buttons stay disabled until a write path exists. -->
+              <button type="button" disabled aria-label="Next vehicle state" title="Setting the state is not available yet">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l4-4 4 4"></path></svg>
+              </button>
+              <button type="button" disabled aria-label="Previous vehicle state" title="Setting the state is not available yet">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5l4 4 4-4"></path></svg>
+              </button>
+            </div>
           </div>
-          <button id="apply" type="submit">Apply</button>
         </div>
-        <p class="hint">Choose 0 A (pause) or a whole value from 6 A to the installation limit. The charger keeps this value while this page is running.</p>
-        <p id="write-message" class="message" role="status" aria-live="polite"></p>
-      </form>
-      <div class="current-setting">
-        <span>Set on the charger</span>
-        <strong id="configured-limit">—</strong>
-      </div>
-      <div class="current-setting">
-        <span>Operator limit (set on the AMTRON page)</span>
-        <strong id="operator-limit">—</strong>
-      </div>
-      <p id="operator-warning" class="warning" hidden></p>
-      <p id="settings-updated" class="updated">Waiting for charger settings</p>
-    </section>
-
-    <section class="readings" aria-label="Charger current readings">
-      <article class="panel reading-card">
-        <p class="eyebrow">Vehicle signal</p>
-        <h2>Signalled current</h2>
-        <div id="signalled-current" class="reading-value">—</div>
-        <p class="description">Limit currently advertised to the simulated vehicle</p>
-        <p id="signalled-updated" class="updated">Waiting for charger data</p>
-      </article>
-      <article class="panel reading-card">
-        <p class="eyebrow">Energy meter</p>
-        <h2>Measured current draw</h2>
-        <div id="meter-current" class="meter-values"><span class="reading-value">—</span></div>
-        <p class="description">Current measured by the charger, per phase</p>
-        <p id="meter-updated" class="updated">Waiting for charger data</p>
-      </article>
-    </section>
-
-    <section class="panel state-panel" aria-label="Charger state">
-      <div><span class="eyebrow">Vehicle state</span><strong id="vehicle-state">—</strong></div>
-      <div><span class="eyebrow">Charger status</span><strong id="charger-status">—</strong></div>
-    </section>
-
-    <section class="chain" aria-label="Power chain">
-      <div class="chain-heading">
-        <h2>Power chain</h2>
-        <span id="mqtt-state" class="connection" data-state="loading">Broker …</span>
-      </div>
-      <div class="chain-cards">
-        <article class="panel chain-card">
-          <p class="eyebrow">Board</p>
-          <h3>Setpoint, raw</h3>
-          <div id="board-setpoint" class="chain-value">—</div>
-          <p id="board-detail" class="description">Waiting for the board</p>
-          <p id="board-updated" class="updated">Waiting for data</p>
-        </article>
-        <article class="panel chain-card">
-          <p id="setpoint-label" class="eyebrow">Setpoint</p>
-          <h3>Setpoint, 1 s average</h3>
-          <div id="setpoint-value" class="chain-value">—</div>
-          <p class="description">DC target <strong id="target-value">—</strong></p>
-          <p id="server-detail" class="description">Waiting for the server</p>
-          <p id="setpoint-updated" class="updated">Waiting for data</p>
-        </article>
-        <article class="panel chain-card">
-          <p class="eyebrow">Inverter</p>
-          <h3>DC power, MPPT 1</h3>
-          <div id="inverter-dc" class="chain-value">—</div>
-          <p class="description">Taken from the charger side, as read by the setpoint server</p>
-          <p id="inverter-updated" class="updated">Waiting for data</p>
-        </article>
-      </div>
-    </section>
-
-    <section class="panel chart-panel" aria-labelledby="chart-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Last 10 minutes</p>
-          <h2 id="chart-title">Power</h2>
+        <div class="status-row">
+          <span>Status</span>
+          <span id="command-status" class="status-pill" data-kind="idle" role="status" aria-live="polite">No command yet</span>
         </div>
-        <span id="chart-note" class="ceiling">Waiting for history</span>
       </div>
-      <canvas id="chart" role="img" aria-label="Line chart of the board setpoint, the setpoint average, the DC target and the inverter DC power over the last ten minutes"></canvas>
-      <div class="legend">
-        <button type="button" class="legend-item" data-series="cp_w" aria-pressed="true"><i class="swatch"></i><span>Board, raw</span></button>
-        <button type="button" class="legend-item" data-series="setpoint_w" aria-pressed="true"><i class="swatch"></i><span id="legend-setpoint">Setpoint, average</span></button>
-        <button type="button" class="legend-item" data-series="target_dc_w" aria-pressed="true"><i class="swatch"></i><span>DC target</span></button>
-        <button type="button" class="legend-item" data-series="dc_w" aria-pressed="true"><i class="swatch"></i><span>Inverter DC power</span></button>
+
+      <div class="limit-block">
+        <div class="section-heading">
+          <p class="eyebrow">Maximum current</p>
+          <span id="installation-limit" class="ceiling">Installation limit: —</span>
+        </div>
+        <form id="limit-form">
+          <div class="limit-row">
+            <label class="control-label" for="current-limit">Maximum current</label>
+            <output id="limit-value" class="limit-value" for="current-limit">—</output>
+            <span id="operator-warning" class="warning" hidden></span>
+          </div>
+          <div class="range-wrap">
+            <input id="current-limit" name="current_limit_a" type="range" min="6" max="16" step="1" value="6" aria-label="Maximum current in amps">
+            <div class="ticks" aria-hidden="true">
+              <span id="tick-min">6 A</span>
+              <span id="tick-mid" hidden>—</span>
+              <span id="tick-max">16 A</span>
+            </div>
+          </div>
+        </form>
       </div>
     </section>
+
+    <div class="layout">
+      <section class="panel chart-panel" aria-labelledby="chart-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Last 10 minutes</p>
+            <h2 id="chart-title" class="visually-hidden">History</h2>
+            <select id="chart-unit" class="unit-select" aria-label="Chart quantity">
+              <option value="W">Power [W]</option>
+              <option value="A">Current [A]</option>
+            </select>
+          </div>
+          <span id="chart-note" class="ceiling">Waiting for history</span>
+        </div>
+        <canvas id="chart" role="img" aria-label="Line chart of the selected quantity over the last ten minutes"></canvas>
+        <div id="legend" class="legend"></div>
+      </section>
+
+      <div class="side">
+        <section class="panel list-panel" aria-labelledby="setpoints-title">
+          <h2 id="setpoints-title">Setpoints</h2>
+          <dl class="rows">
+            <div class="row"><dt>Signalled current</dt><dd id="signalled-current">—</dd></div>
+            <div class="row"><dt>Board setpoint</dt><dd id="board-setpoint">—</dd></div>
+            <div class="row"><dt>EV setpoint</dt><dd id="setpoint-value">—</dd></div>
+          </dl>
+          <p id="setpoints-updated" class="updated">Waiting for data</p>
+        </section>
+
+        <section class="panel list-panel" aria-labelledby="measurements-title">
+          <h2 id="measurements-title">Measurements</h2>
+          <dl class="rows">
+            <div class="row"><dt>Car charger</dt><dd id="meter-charger">—</dd></div>
+            <div class="row"><dt>DC input</dt><dd id="inverter-dc">—</dd></div>
+            <div class="row"><dt>AC output</dt><dd id="inverter-ac">—</dd></div>
+          </dl>
+          <p id="measurements-updated" class="updated">Waiting for data</p>
+        </section>
+      </div>
+    </div>
 
     <footer>
       <span id="last-updated">Readings refresh every 2 seconds.</span>

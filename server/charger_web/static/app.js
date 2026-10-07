@@ -1,16 +1,13 @@
 const el = (id) => document.getElementById(id);
 const form = el("limit-form");
-const input = el("current-limit");
-const applyButton = el("apply");
+const slider = el("current-limit");
 let polling = false;
 let pollAgain = false;
 let writePending = false;
+let editing = false;            // the slider is being moved or its value is being sent: the poll must not move it
+let queuedValue = null;         // a value chosen while another write was in flight
 let installationLimit = null;
-
-function formatAmps(value) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Unavailable";
-  return `${value} A`;
-}
+let lastSetLimit = null;        // the limit the charger last confirmed
 
 function updateConnection(status, error) {
   const badge = el("connection");
@@ -25,50 +22,37 @@ function updateConnection(status, error) {
   el("last-updated").textContent = error || "Readings refresh every 2 seconds.";
 }
 
-function renderReading(target, reading, phases = false) {
-  target.replaceChildren();
-  if (!reading || reading.status === "unavailable" || reading.value === null || reading.value === undefined) {
-    const value = document.createElement("span");
-    value.className = "reading-value";
-    value.textContent = "Unavailable";
-    target.append(value);
-    return;
-  }
-  if (phases && typeof reading.value === "object" && !Array.isArray(reading.value)) {
-    for (const [phase, current] of Object.entries(reading.value)) {
-      const item = document.createElement("span");
-      item.className = "meter-phase";
-      const label = document.createElement("small");
-      label.textContent = phase;
-      item.append(label, document.createTextNode(formatAmps(current)));
-      target.append(item);
-    }
-    if (target.childElementCount === 0) {
-      const value = document.createElement("span");
-      value.className = "reading-value";
-      value.textContent = "Unavailable";
-      target.append(value);
-    }
-    return;
-  }
-  const value = document.createElement("span");
-  value.className = "reading-value";
-  value.textContent = formatAmps(reading.value);
-  target.append(value);
+function meanOf(values) {
+  const numbers = Object.values(values || {}).filter((value) => Number.isFinite(value));
+  return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null;
 }
 
-function updateTimestamp(target, reading) {
-  if (reading && reading.status === "unavailable") {
-    target.textContent = "Reading unavailable";
-    return;
-  }
-  if (!reading || !reading.updated_at) {
-    target.textContent = "No successful reading yet";
-    return;
-  }
-  const date = new Date(reading.updated_at);
-  const time = Number.isNaN(date.getTime()) ? "unknown time" : date.toLocaleTimeString();
-  target.textContent = `${reading.status === "stale" ? "Stale · last updated" : "Updated"} ${time}`;
+// The pill says only "Validated" or "Not validated"; the reason for a refusal is in its tooltip.
+function setStatus(kind, text, detail = "") {
+  const pill = el("command-status");
+  pill.dataset.kind = kind;
+  pill.textContent = text;
+  pill.title = detail;
+}
+
+function tickAt(id, value) {
+  const min = Number(slider.min), max = Number(slider.max);
+  const tick = el(id);
+  tick.style.left = `${((value - min) / (max - min)) * 100}%`;
+}
+
+// The big value, and the middle tick that marks it on the slider (hidden when it sits on an end).
+function showLimit() {
+  const value = Number(slider.value);
+  const paused = lastSetLimit === 0 && !editing;
+  el("limit-value").textContent = paused ? "0 A" : `${value} A`;
+  const min = Number(slider.min), max = Number(slider.max);
+  el("tick-min").textContent = `${min} A`;
+  el("tick-max").textContent = `${max} A`;
+  const mid = el("tick-mid");
+  mid.hidden = paused || value <= min || value >= max;
+  mid.textContent = `${value} A`;
+  if (!mid.hidden) tickAt("tick-mid", value);
 }
 
 function updateBanner(status) {
@@ -96,30 +80,36 @@ function applyStatus(status) {
   const empty = { value: null, status: "unavailable" };
   const signalled = status.signalled_current_a || empty;
   const meter = status.meter_current_a || empty;
-  renderReading(el("signalled-current"), signalled);
-  renderReading(el("meter-current"), meter, true);
-  updateTimestamp(el("signalled-updated"), signalled);
-  updateTimestamp(el("meter-updated"), meter);
+  const charger = meter.status === "ok" ? meanOf(meter.value) : null;
+
+  const signalledCell = el("signalled-current");
+  signalledCell.textContent = formatAmpsValue(signalled.value);
+  signalledCell.dataset.status = signalled.status;
+  const chargerCell = el("meter-charger");
+  chargerCell.textContent = formatPair(meanOf(meter.value), null);   // watts are not read from the charger yet
+  chargerCell.dataset.status = meter.status;
+  chargerCell.title = "Mean of the three phases";
+  recordCurrentSample(signalled, charger);
 
   const setLimit = status.set_limit_a || empty;
   const operator = status.operator_limit_a || empty;
   const installation = status.installation_limit_a || empty;
   installationLimit = installation.value;
-  el("configured-limit").textContent = formatAmps(setLimit.value);
-  el("operator-limit").textContent = formatAmps(operator.value);
-  el("installation-limit").textContent = `Installation limit: ${formatAmps(installation.value)}`;
+  el("installation-limit").textContent = `Installation limit: ${installation.value === null ? "—" : `${installation.value} A`}`;
   const warning = el("operator-warning");
   warning.hidden = !status.operator_below_set;
   warning.textContent = status.operator_below_set
-    ? `The AMTRON page's own limit of ${operator.value} A caps the signalled current below the ${setLimit.value} A set here.`
+    ? `The AMTRON page's limit of ${operator.value} A caps the signalled current.`
     : "";
-  el("vehicle-state").textContent = (status.vehicle_state && status.vehicle_state.value) || "Unavailable";
-  el("charger-status").textContent = (status.charger_status && status.charger_status.value) || "Unavailable";
-  updateTimestamp(el("settings-updated"), setLimit);
+  el("vehicle-state").textContent = (status.vehicle_state && status.vehicle_state.value) || "—";
   updateBanner(status);
-  input.max = installation.value === null ? 16 : Math.min(16, installation.value);
-  if (setLimit.value !== null && document.activeElement !== input) input.value = setLimit.value;
-  applyButton.disabled = writePending;
+
+  slider.max = installation.value === null ? 16 : Math.min(16, installation.value);
+  lastSetLimit = setLimit.value;
+  if (setLimit.value !== null && !editing && !writePending) {
+    slider.value = Math.max(Number(slider.min), setLimit.value);
+  }
+  showLimit();
 }
 
 async function refresh() {
@@ -136,8 +126,6 @@ async function refresh() {
     applyStatus(status);
   } catch (error) {
     updateConnection("unavailable", error.message);
-    el("signalled-updated").textContent = "Refresh failed; last displayed value may be stale";
-    el("meter-updated").textContent = "Refresh failed; last displayed value may be stale";
   } finally {
     polling = false;
     if (pollAgain) {
@@ -147,22 +135,24 @@ async function refresh() {
   }
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const message = el("write-message");
-  const value = Number(input.value);
-  message.textContent = "";
-  message.dataset.kind = "";
-  if (!Number.isInteger(value) || (value !== 0 && (value < 6 || value > 16)) ||
-      (installationLimit !== null && value > installationLimit)) {
-    message.dataset.kind = "error";
-    message.textContent = "Choose 0 A or a whole value from 6 A to the installation limit.";
+function restoreSlider() {
+  if (lastSetLimit !== null) slider.value = Math.max(Number(slider.min), lastSetLimit);
+  showLimit();
+}
+
+async function sendLimit(value) {
+  if (writePending) {
+    queuedValue = value;
     return;
   }
-
+  if (!Number.isInteger(value) || value < 6 || value > 16 || (installationLimit !== null && value > installationLimit)) {
+    setStatus("error", "Not validated", "Choose a whole value from 6 A to the installation limit.");
+    editing = false;
+    restoreSlider();
+    return;
+  }
   writePending = true;
-  applyButton.disabled = true;
-  applyButton.textContent = "Applying…";
+  setStatus("pending", "Sending…");
   try {
     const response = await fetch("/api/charger/operator-limit", {
       method: "POST",
@@ -171,22 +161,32 @@ form.addEventListener("submit", async (event) => {
     });
     const result = await response.json();
     if (!response.ok || !result.success) throw new Error(result.error || "The charger did not confirm the setting.");
-    message.dataset.kind = "success";
-    message.textContent = `Confirmed by charger: ${formatAmps(result.set_limit_a)}.`;
-    pollAgain = true;
-    await refresh();
+    lastSetLimit = result.set_limit_a;
+    setStatus("ok", "Validated");
   } catch (error) {
-    message.dataset.kind = "error";
-    message.textContent = error.message;
-    pollAgain = true;
-    await refresh();
+    setStatus("error", "Not validated", error.message);
+    restoreSlider();
   } finally {
     writePending = false;
-    applyButton.textContent = "Apply";
-    applyButton.disabled = false;
+    if (queuedValue === null) editing = false;
+    pollAgain = true;
+    await refresh();
+    if (queuedValue !== null) {
+      const next = queuedValue;
+      queuedValue = null;
+      await sendLimit(next);
+    }
   }
-});
+}
 
+slider.addEventListener("input", () => {
+  editing = true;
+  showLimit();
+});
+// "change" fires when the slider is released (or a key press settles): that is when the value is sent.
+slider.addEventListener("change", () => void sendLimit(Number(slider.value)));
+form.addEventListener("submit", (event) => event.preventDefault());
 el("refresh").addEventListener("click", () => void refresh());
+showLimit();
 void refresh();
 window.setInterval(() => void refresh(), 2000);

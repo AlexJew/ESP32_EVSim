@@ -22,8 +22,10 @@ log = logging.getLogger("charger_web.service")
 READ_ORDER = (
     "set_limit_a", "operator_limit_a", "installation_limit_a", "signalled_current_a", "vehicle_state",
     "charger_status", "meter_current_l1_a", "meter_current_l2_a", "meter_current_l3_a",
+    "meter_power_w", "meter_voltage_l1_v", "meter_voltage_l2_v", "meter_voltage_l3_v",
 )
 PHASES = (("L1", "meter_current_l1_a"), ("L2", "meter_current_l2_a"), ("L3", "meter_current_l3_a"))
+VOLT_PHASES = (("L1", "meter_voltage_l1_v"), ("L2", "meter_voltage_l2_v"), ("L3", "meter_voltage_l3_v"))
 VEHICLE_STATES = {1: "A", 2: "B", 3: "C", 4: "D", 5: "E"}
 CHARGER_STATUS = {
     0: "Available", 1: "Occupied", 2: "Reserved", 3: "Unavailable", 4: "Faulted", 5: "Preparing",
@@ -132,6 +134,8 @@ class ChargerService:
 
             phases = {phase: values[name] for phase, name in PHASES if values[name] is not None}
             meter_at = min((at[name] for phase, name in PHASES if values[name] is not None), default=None)
+            volts = {phase: values[name] for phase, name in VOLT_PHASES if values[name] is not None}
+            volts_at = min((at[name] for phase, name in VOLT_PHASES if values[name] is not None), default=None)
             state_raw, status_raw = values["vehicle_state"], values["charger_status"]
             state_text = None if state_raw is None else VEHICLE_STATES.get(state_raw, f"state {state_raw}")
             status_text = None if status_raw is None else CHARGER_STATUS.get(status_raw, f"status {status_raw}")
@@ -145,6 +149,8 @@ class ChargerService:
                 "installation_limit_a": reading("installation_limit_a"),
                 "signalled_current_a": reading("signalled_current_a"),
                 "meter_current_a": self._reading(phases or None, meter_at, link, now),
+                "meter_voltage_v": self._reading(volts or None, volts_at, link, now),
+                "meter_power_w": reading("meter_power_w"),
                 "vehicle_state": self._reading(state_text, at["vehicle_state"], link, now),
                 "charger_status": self._reading(status_text, at["charger_status"], link, now),
                 "paused": bool(set_limit and signalled == 0),

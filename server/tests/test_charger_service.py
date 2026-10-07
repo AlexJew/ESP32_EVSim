@@ -41,6 +41,7 @@ class RegisterMapTest(unittest.TestCase):
             "set_limit_a": 1000, "operator_limit_a": 134, "installation_limit_a": 133,
             "signalled_current_a": 706, "vehicle_state": 122, "charger_status": 104,
             "meter_current_l1_a": 212, "meter_current_l2_a": 214, "meter_current_l3_a": 216,
+            "meter_power_w": 220, "meter_voltage_l1_v": 222, "meter_voltage_l2_v": 224, "meter_voltage_l3_v": 226,
         })
         self.assertEqual(m["registers"]["meter_current_l1_a"], {"address": 212, "size": 2, "scale": 0.001})
 
@@ -51,6 +52,36 @@ class RegisterMapTest(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             load_map(f.name)
         self.assertIn("operator_limit_a", str(cm.exception))
+
+
+class MeterTest(ServiceTest):
+    def test_the_status_carries_the_power_and_the_phase_voltages(self):
+        self.service.poll_once()
+        s = self.service.status()
+        self.assertEqual((s["meter_power_w"]["value"], s["meter_power_w"]["status"]), (600, "ok"))
+        self.assertEqual((s["meter_voltage_v"]["value"], s["meter_voltage_v"]["status"]),
+                         ({"L1": 231, "L2": 232, "L3": 233}, "ok"))
+
+    def test_no_meter_is_unavailable_not_a_huge_number(self):
+        for address in (220, 222, 224, 226):
+            self.fake.set_u32(address, 0xFFFFFFFF)
+        self.service.poll_once()
+        s = self.service.status()
+        self.assertEqual((s["meter_power_w"]["value"], s["meter_power_w"]["status"]), (None, "unavailable"))
+        self.assertEqual(s["meter_voltage_v"]["status"], "unavailable")
+
+    def test_a_refused_voltage_register_leaves_the_others_reading(self):
+        self.fake.refuse_reads = {224}
+        self.service.poll_once()
+        s = self.service.status()
+        self.assertEqual(s["meter_voltage_v"]["value"], {"L1": 231, "L3": 233})
+        self.assertEqual(s["meter_power_w"]["value"], 600)
+
+    def test_the_new_registers_are_only_read(self):
+        self.service.poll_once()
+        self.assertEqual({entry[0] for entry in self.fake.log}, {3})
+        self.assertIn((3, 220, 2), self.fake.log)
+        self.assertEqual(self.fake.writes, [])
 
 
 class ReadTest(ServiceTest):

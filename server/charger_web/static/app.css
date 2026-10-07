@@ -66,7 +66,7 @@ h2 { font-size: 1.12rem; letter-spacing: -.02em; margin-bottom: 0; }
 .ceiling { color: var(--muted); font-size: .84rem; text-align: right; }
 .limit-row { align-items: baseline; display: flex; flex-wrap: nowrap; gap: 6px 16px; }
 .limit-row .control-label, .limit-value { flex: none; }
-.limit-value { font-size: 1.75rem; font-variant-numeric: tabular-nums; font-weight: 740; letter-spacing: -.04em; }
+.limit-value { font-size: 1.25rem; font-variant-numeric: tabular-nums; font-weight: 740; letter-spacing: -.03em; }
 .warning { color: var(--warning); flex: 1 1 0; font-size: .84rem; min-width: 0; }
 .range-wrap { padding: 8px 8px 0; }
 input[type="range"] { accent-color: var(--green); height: 28px; margin: 0; width: 100%; }
@@ -85,7 +85,7 @@ button:disabled { cursor: wait; opacity: .58; }
 .layout { align-items: stretch; display: flex; flex-wrap: wrap; gap: 18px; margin-top: 18px; }
 .chart-panel { display: flex; flex: 2 1 620px; flex-direction: column; gap: 14px; min-width: 0; padding: 24px; }
 .chart-panel .eyebrow { margin-bottom: 8px; }
-.unit-select { background: #fbfcfb; border: 1px solid #bdcbc2; border-radius: 10px; color: var(--ink); cursor: pointer; font: inherit; font-size: 1.12rem; font-weight: 700; letter-spacing: -.02em; min-height: 44px; padding: 8px 12px; }
+.unit-select { background: #fbfcfb; border: 1px solid #bdcbc2; border-radius: 10px; color: var(--ink); cursor: pointer; font: inherit; font-size: .82rem; font-weight: 650; letter-spacing: normal; min-height: 44px; padding: 8px 12px; }
 #chart { display: block; height: 320px; width: 100%; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px; }
 .legend-item { align-items: center; background: #f0f5f2; color: var(--ink); display: inline-flex; font-size: .82rem; font-weight: 650; gap: 8px; min-height: 44px; padding: 8px 14px; }
@@ -113,7 +113,7 @@ footer { align-items: center; color: var(--muted); font-size: .79rem; margin-top
   .controls { padding: 22px; }
   .section-heading { flex-direction: column; gap: 10px; }
   .ceiling { text-align: left; }
-  dd { font-size: 1.1rem; }
+  dd, .limit-value { font-size: 1.1rem; }
 }
 
 .unit-select:disabled { cursor: not-allowed; opacity: .5; }

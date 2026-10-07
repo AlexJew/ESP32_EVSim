@@ -133,6 +133,23 @@ class PageTest(unittest.TestCase):
             for gone in ("setpoints-updated", "measurements-updated", "ageText"):
                 self.assertNotIn(gone, script_text(name), (name, gone))
 
+    def test_the_dropdown_text_is_the_size_of_the_legend_bubbles_text(self):
+        css = (STATIC / "app.css").read_text(encoding="utf-8")
+        for prop in ("font-size", "font-weight"):
+            legend = re.search(r"\.legend-item\s*\{[^}]*?%s:\s*([^;]+);" % prop, css).group(1)
+            dropdown = re.search(r"\.unit-select\s*\{[^}]*?%s:\s*([^;]+);" % prop, css).group(1)
+            self.assertEqual(dropdown, legend, prop)
+
+    def test_the_maximum_current_value_is_the_size_of_the_values_in_the_two_lists(self):
+        css = (STATIC / "app.css").read_text(encoding="utf-8")
+        def sizes(selector):
+            # the selector may be one of a list: "dd, .limit-value { ... }"
+            return re.findall(r"(?:^|[\s},])%s\s*(?:,[^{}]*)?\{[^}]*?font-size:\s*([^;]+);" % re.escape(selector), css)
+        self.assertEqual(sizes(".limit-value"), sizes("dd"))                    # the normal size and the phone override
+        self.assertEqual(len(sizes("dd")), 2)
+        weight = lambda selector: re.search(r"%s\s*\{[^}]*?font-weight:\s*([^;]+);" % re.escape(selector), css).group(1)
+        self.assertEqual(weight(".limit-value"), weight("dd"))
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')

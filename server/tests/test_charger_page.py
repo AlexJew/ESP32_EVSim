@@ -59,8 +59,8 @@ class PageTest(unittest.TestCase):
 
     def test_the_page_has_the_chart_and_the_two_lists(self):
         for needed in ("chart", "chart-unit", "chart-note", "legend", "mqtt-state", "connection",
-                       "signalled-current", "board-setpoint", "setpoint-value", "setpoints-updated",
-                       "meter-charger", "inverter-dc", "inverter-ac", "measurements-updated"):
+                       "signalled-current", "board-setpoint", "setpoint-value",
+                       "meter-charger", "inverter-dc", "inverter-ac"):
             self.assertIn(needed, page_ids())
 
     def test_the_maximum_current_is_a_slider_from_6_amps(self):
@@ -125,6 +125,14 @@ class PageTest(unittest.TestCase):
         self.assertIn("zoom", canvas.get("title", ""))                         # the usage hint is a tooltip, not a new line
         self.assertNotIn("Scroll or pinch over the chart", html)
 
+    def test_the_two_lists_have_no_updated_line_dimming_says_when_a_value_is_old(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("Waiting for data", html)
+        self.assertEqual([attrs for t, attrs in parsed_page().tags if attrs.get("class") == "updated"], [])
+        for name in SCRIPTS:
+            for gone in ("setpoints-updated", "measurements-updated", "ageText"):
+                self.assertNotIn(gone, script_text(name), (name, gone))
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')
@@ -140,7 +148,8 @@ class PageTest(unittest.TestCase):
 
     def test_the_removed_cards_are_gone(self):
         for removed in ("operator-limit", "configured-limit", "charger-status", "board-detail", "server-detail",
-                        "target-value", "apply", "signalled-updated", "meter-updated", "stepper-value"):
+                        "target-value", "apply", "signalled-updated", "meter-updated", "stepper-value",
+                        "setpoints-updated", "measurements-updated"):
             self.assertNotIn(removed, page_ids())
 
     def test_no_rest_session_leftovers_in_the_page(self):

@@ -81,15 +81,6 @@ function setMeasurement(row, amps, volts, watts, reading) {
   drawMeasurement(row);
 }
 
-function ageText(reading) {
-  if (!reading || reading.status === "unavailable") return "No reading yet";
-  const stale = reading.status === "stale";
-  if (!reading.updated_at) return stale ? "Stale" : "Updated";
-  const date = new Date(reading.updated_at);
-  const time = Number.isNaN(date.getTime()) ? "unknown time" : date.toLocaleTimeString();
-  return `${stale ? "Stale · last updated" : "Updated"} ${time}`;
-}
-
 function readingStatus(reading) {
   return reading ? reading.status : "unavailable";
 }
@@ -123,7 +114,6 @@ function renderTelemetry(data) {
 
   const board = data.board || {};
   setValue("board-setpoint", formatWatts(board.setpoint_w && board.setpoint_w.value), board.setpoint_w);
-  byId("setpoints-updated").textContent = ageText(board.setpoint_w);
   syncStateSelect(connected, board.state);
 
   const setpoint = data.setpoint || {};
@@ -134,7 +124,6 @@ function renderTelemetry(data) {
   const value = (name) => (inverter[name] ? inverter[name].value : null);
   setMeasurement("dc", value("dc_a"), value("dc_v"), value("dc_w"), inverter.dc_w);
   setMeasurement("ac", value("ac_a"), value("ac_v"), value("ac_w"), inverter.ac_w);
-  byId("measurements-updated").textContent = `Inverter · ${ageText(inverter.dc_w)}`;
 }
 
 // -- the chart ---------------------------------------------------------------------------------------

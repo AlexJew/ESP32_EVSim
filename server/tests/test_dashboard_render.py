@@ -93,7 +93,7 @@ class RenderTest(unittest.TestCase):
         out = run(telemetry())["elements"]
         self.assertEqual((out["inverter-dc"]["text"], out["inverter-dc"]["status"]), ("10.9 A / 520 V / 5662 W", "ok"))
         self.assertEqual((out["inverter-ac"]["text"], out["inverter-ac"]["status"]), ("8.1 A / 233 V / 5500 W", "ok"))
-        self.assertTrue(out["measurements-updated"]["text"].startswith("Inverter · "))
+        self.assertNotIn("measurements-updated", out)               # no "Updated ..." line under the card
 
     def test_an_old_setpoint_server_leaves_dashes_for_the_new_values(self):
         out = run(telemetry(values={"dc_w": 5661.8, "ac_w": 5500.2}))["elements"]
@@ -106,10 +106,10 @@ class RenderTest(unittest.TestCase):
         self.assertEqual((up["text"], up["state"]), ("Broker connected", "ok"))
         self.assertEqual((down["text"], down["state"]), ("Broker not connected", "unavailable"))
 
-    def test_a_stale_value_is_dimmed_and_its_age_line_says_so(self):
+    def test_a_stale_value_is_dimmed(self):
         out = run(telemetry(board="stale", inverter="stale"))["elements"]
         self.assertEqual(out["board-setpoint"]["status"], "stale")
-        self.assertTrue(out["setpoints-updated"]["text"].startswith("Stale"))
+        self.assertNotIn("setpoints-updated", out)
         self.assertEqual((out["inverter-dc"]["status"], out["inverter-ac"]["status"]), ("stale", "stale"))
 
     def test_nothing_received_shows_dashes_and_dims_everything(self):
@@ -118,7 +118,7 @@ class RenderTest(unittest.TestCase):
         self.assertEqual((out["inverter-dc"]["text"], out["inverter-ac"]["text"]), ("— / — / —", "— / — / —"))
         for element in ("board-setpoint", "setpoint-value", "inverter-dc", "inverter-ac"):
             self.assertEqual(out[element]["status"], "unavailable", element)
-        self.assertEqual(out["setpoints-updated"]["text"], "No reading yet")
+        self.assertNotIn("setpoints-updated", out)
 
     def test_the_power_legend_has_five_entries_all_shown(self):
         out = run()

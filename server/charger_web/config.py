@@ -29,6 +29,11 @@ DEFAULT_SETPOINT_TOPIC = "evsim/setpoint"   # becomes evsim/electric_car with th
 TOPIC_INVERTER = "evsim/inverter"           # the setpoint server's inverter status, 1 Hz
 MAX_SETPOINT_W = 12000            # the inverter's rating; a larger setpoint_w is dropped, not clamped
 MAX_DC_W = 30000                  # a measured DC power above this is not believed (the inverter is a 12 kW unit)
+MAX_A = 100                       # likewise for a measured current ...
+MAX_V = 1000                      # ... and a measured voltage (the DC side runs near 520 V)
+TOPIC_CMD_STATE = "evsim/cmd/state"   # the page publishes A, B or C here (QoS 1, not retained)
+TOPIC_REPLY = "evsim/reply"           # the board's one-line answer to every command
+STATE_REPLY_TIMEOUT_S = 3             # how long a state command waits for the board's answer
 
 HISTORY_WINDOW_S = 600            # the chart shows the last 10 minutes
 HISTORY_PERIOD_S = 1              # one frame per second

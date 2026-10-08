@@ -18,7 +18,7 @@ The thesis chain turns a current limit written to the AMTRON into a load on the 
 - **The recorder runs the experiment** with one command. There is no separate `set-limit` command.
 - **Full-resolution events**, **SQLite**, one file per run.
 - **The charger's measurements are logged too** (signalled current, phase currents, phase voltages, total power), so power differentials can be assessed as well as delays.
-- **Characterize the current setup, do not improve it:** no faster sampling than the existing 2 s charger poll and 1 Hz inverter messages, no fast inverter reader, no change to the firmware or the web page.
+- **Characterize the current setup, do not improve it:** no sampling faster than 1 Hz anywhere (the charger poll is **1 s in the recorder**, aligned with the 1 Hz setpoint and inverter messages, instead of the page's 2 s), no fast inverter reader, no change to the firmware or the web page.
 - **Cheap changes are welcome:** the setpoint server and the inverter writer get **additive timestamp fields** (below); the board's own uptime is already in every `evsim/cp` sample.
 
 ## Design
@@ -26,12 +26,12 @@ The thesis chain turns a current limit written to the AMTRON into a load on the 
 ### The command
 
 ```
-python -m evsim_recorder run --steps 6,7,6,12,16,6 --dwell 60 [--repeat 1] [--db PATH] [--host H] [--port P] [--leave] [--yes]
+python -m evsim_recorder run --steps 6,7,6,12,16,6 --dwell 60 [--repeat 1] [--db PATH] [--host H] [--port P] [--charger-period 1] [--leave] [--yes]
 ```
 
 - **`--steps`**: the maximum currents to write, in order, each **0 or a whole number from 6 to 16** and not above the charger's installation limit. They are all validated before anything is written; one bad value stops the command with a message and nothing is written.
 - **`--dwell`**: seconds to hold each step (default 60), so each response settles and the steady state can be averaged. **`--repeat`**: how many times to run the whole list (default 1).
-- **`--db`**: the SQLite file; default `data/recordings/evsim-<UTC date and time>.sqlite`. **`--host`, `--port`**: the MQTT broker (default `127.0.0.1:1883`). The charger's address is `EVSIM_CHARGER_HOST`, as for the page.
+- **`--db`**: the SQLite file; default `data/recordings/evsim-<UTC date and time>.sqlite`. **`--host`, `--port`**: the MQTT broker (default `127.0.0.1:1883`). The charger's address is `EVSIM_CHARGER_HOST`, as for the page. **`--charger-period`**: seconds between charger polls, 1 to 10 (default 1).
 - **Safety:** the command prints the plan (the steps, the dwell, the total time, the charger's address) and the limit currently set, and **asks for confirmation** (`--yes` skips the question). At the end, or on Ctrl-C or SIGTERM, it **writes back the limit that was set when it started** (best effort, logged as a final step); `--leave` keeps the last step instead. A step of 0 A pauses charging; it is allowed when listed, and the plan says so.
 - **Only register 1000 is ever written**, with the same safety rules as the page (`WRITABLE_ADDRESS`; the operator limit, register 134, is never written; the values above).
 
@@ -44,7 +44,7 @@ It runs, in one process: the MQTT recorder, the charger poller and the step runn
 
 ### The charger poller
 
-The recorder reuses the page's `ChargerService` (`server/charger_web/service.py`): one Modbus connection, a read of every register every 2 s, which is also the heartbeat the charger needs (after 30 s without Modbus traffic it falls back to 0 A, so the recorder must keep polling for the whole run). Two additive changes to the service, invisible to the page:
+The recorder reuses the page's `ChargerService` (`server/charger_web/service.py`): one Modbus connection, a read of every register **every 1 s** in the recorder (`ChargerService` already takes a poll period; the page keeps its 2 s default, so the page does not change), which is also the heartbeat the charger needs (after 30 s without Modbus traffic it falls back to 0 A, so the recorder must keep polling for the whole run). Two additive changes to the service, invisible to the page:
 
 - an optional **`on_poll` callback**, called after every poll with the poll's start and end times (`time.time_ns()`), the raw register values (each phase current, each phase voltage, total power, signalled current, the limits, the states) or the error;
 - `set_limit` additionally returns **`write_sent_ns`** and **`write_acked_ns`**: the wall clock just before the write request and just after its reply.
@@ -92,7 +92,7 @@ All times come from one computer's clock, so delays are exact for what is local 
 
 - `evsim/setpoint` and `evsim/inverter` come from the setpoint server on the same computer: arrival is accurate to about a millisecond, and the new `ts_ms`, `read_ts_ms` and `cap_ts_ms` give the server's own times. Their content is sampled: the server averages `evsim/cp` over 1 s and publishes once a second; the inverter writer reads and publishes once a second.
 - `evsim/cp` crosses the WiFi from the board: its arrival time includes a transit time that is not known and varies. The board's uptime (`board_ms`) shows its sampling regularity.
-- The charger's own readings (`charger` table) are one poll every **2 s**, each poll a few milliseconds long: the signalled current and the meter resolve the charger's side of a step to about 2 s. They suit the **steady-state** comparisons (power at each current) well; for delays, the first sample that moves is `evsim/cp`.
+- The charger's own readings (`charger` table) are one poll every **1 s** (`--charger-period`, 1 to 10 s), each poll of 13 reads a few tens of milliseconds long: the signalled current and the meter resolve the charger's side of a step to about 1 s, the same rhythm as the setpoint and inverter messages. They suit the **steady-state** comparisons (power at each current) well. The AMTRON has not been polled this fast before: the live check watches for errors, and a longer period is the fallback.
 - Time zero (`t_write_ns`) is exact: the same process writes the register and reads the clock.
 
 ### Running next to the web page
@@ -101,7 +101,7 @@ The page's service **re-writes the limit last set with Apply** if the charger re
 
 ### Files and housekeeping
 
-`data/recordings/` is git-ignored (`*.sqlite`, `*.sqlite-wal`, `*.sqlite-shm`). About 7 messages a second plus one charger row every 2 s is roughly 150 MB a day; a run is meant to last the length of an experiment. `server/README.md` gains a section: the command, the safety behaviour, the tables and views, the limits above, and two example queries with pandas: the delay from a `limit_writes.t_write_ns` to the first `cp`, `setpoint` and `inverter` rows that differ from their value before the write by more than a threshold, and the mean charger, DC and AC power over the last 20 s of each step.
+`data/recordings/` is git-ignored (`*.sqlite`, `*.sqlite-wal`, `*.sqlite-shm`). About 7 messages a second plus one charger row every second is roughly 150 MB a day; a run is meant to last the length of an experiment. `server/README.md` gains a section: the command, the safety behaviour, the tables and views, the limits above, and two example queries with pandas: the delay from a `limit_writes.t_write_ns` to the first `cp`, `setpoint` and `inverter` rows that differ from their value before the write by more than a threshold, and the mean charger, DC and AC power over the last 20 s of each step.
 
 ## Error handling
 
@@ -131,8 +131,8 @@ All with the standard `unittest`, the existing `FakeAmtron` and `FakeMqttClient`
 - **Validity events:** disconnect and reconnect produce `recorder_events` rows; `ended_ns` is set on a clean stop; a second connection can read the file while it is written (WAL).
 - **Setpoint server and inverter writer:** `evsim/setpoint` carries `ts_ms` (epoch milliseconds of the tick, from the injected clock); `evsim/inverter` carries `read_ts_ms` after the read and `cap_ts_ms` after a successful cap write, `null` before the first; every existing field and test is unchanged.
 - **Charger service:** `on_poll` receives the timings and the values; `set_limit` returns the two write times; the page's existing tests pass unchanged.
-- **Live check** (after the suite, on the real rig): restart the setpoint server from the branch; run the recorder with a short plan, for example `--steps 10,11,10 --dwell 45 --yes`, a **1 A step only**, nothing larger, and confirm that the original limit is back at the end; check the tables fill at the expected rates (`cp` about 5 a second with `board_ms` steps near 200, `setpoint` and `inverter` about 1 a second, `charger` one every 2 s), that the new timestamps are present, and run the example delay query on one step. Larger jumps are left to the user's own runs.
+- **Live check** (after the suite, on the real rig): restart the setpoint server from the branch; run the recorder with a short plan, for example `--steps 10,11,10 --dwell 45 --yes`, a **1 A step only**, nothing larger, and confirm that the original limit is back at the end; check the tables fill at the expected rates (`cp` about 5 a second with `board_ms` steps near 200, `setpoint` and `inverter` about 1 a second, `charger` about 1 a second with no `charger_error` events at that rate), that the new timestamps are present, and run the example delay query on one step. Larger jumps are left to the user's own runs.
 
 ## Not in scope
 
-Any change to the firmware or the web page; any sampling faster than the existing 2 s charger poll and 1 Hz inverter messages; a fast inverter reader; computing the delays and differentials (the data and example queries are provided); InfluxDB or any other database; a user interface; clock synchronization across machines; stepping the pilot state; writing any register other than 1000.
+Any change to the firmware or the web page; any sampling faster than 1 Hz; a fast inverter reader; computing the delays and differentials (the data and example queries are provided); InfluxDB or any other database; a user interface; clock synchronization across machines; stepping the pilot state; writing any register other than 1000.

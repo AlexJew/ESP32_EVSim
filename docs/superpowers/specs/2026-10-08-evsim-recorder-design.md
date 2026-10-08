@@ -1,104 +1,138 @@
-# EVSim Recorder: Logging the Chain's Messages to SQLite — Design
+# EVSim Recorder: Stepping the Charger's Limit and Logging the Chain to SQLite — Design
 
 **Date:** 2026-10-08
 **Status:** draft, awaiting review
-**Scope:** a standalone process that records every message of the EVSim MQTT chain, with arrival times to the nanosecond, into a SQLite file, so that the **propagation delay from a change of the charger's maximum current to the change of the current and power along the chain** (charger, board, setpoint server, inverter) can be characterized afterwards, for the system **as it is**. It adds no sampling, changes no existing component and has no interface. Builds on
-[2026-09-29-mqtt-cp-telemetry-design.md](2026-09-29-mqtt-cp-telemetry-design.md) (`evsim/cp`),
-[2026-09-30-setpoint-server-design.md](2026-09-30-setpoint-server-design.md) (`evsim/setpoint`) and
-[2026-09-30-inverter-writer-design.md](2026-09-30-inverter-writer-design.md) (`evsim/inverter`).
+**Scope:** one command, `python -m evsim_recorder run`, that **runs a characterization experiment itself**: it steps the AMTRON's maximum current through a list of values, and records, with one clock and into one SQLite file, everything the chain does in response: the charger's own measurements (current, voltage, power), the board's `evsim/cp`, the setpoint server's `evsim/setpoint` and the inverter's `evsim/inverter`. The data answers two questions for the system **as it is**: how long does a change of the maximum current take to propagate along the chain (small 1 A steps, and large jumps up and down), and what are the power differentials along the chain at each current. Builds on
+[2026-10-01-charger-modbus-backend-design.md](2026-10-01-charger-modbus-backend-design.md) (the charger service, reused),
+[2026-09-29-mqtt-cp-telemetry-design.md](2026-09-29-mqtt-cp-telemetry-design.md),
+[2026-09-30-setpoint-server-design.md](2026-09-30-setpoint-server-design.md) and
+[2026-09-30-inverter-writer-design.md](2026-09-30-inverter-writer-design.md).
 
 ## Why
 
-The thesis chain turns a current limit written to the AMTRON into a load on the inverter: charger (pilot PWM) to board (`evsim/cp`, 5 Hz) to setpoint server (1 s average, `evsim/setpoint`) to inverter writer (cap, `evsim/inverter`, 1 Hz). How long each hop takes, for a 1 A step and for a large jump up or down, is what other users of this setup need to know. Today those messages only scroll past in `mosquitto_sub`. A recorder keeps them with one clock, so the delays can be read out of the data later.
+The thesis chain turns a current limit written to the AMTRON into a load on the inverter: charger (pilot PWM) to board (`evsim/cp`, 5 Hz) to setpoint server (1 s average, `evsim/setpoint`) to inverter writer (cap, `evsim/inverter`, 1 Hz). How long each hop takes, and how much power is lost or gained between the hops at each setpoint, is what other users of this setup need to know. Today those numbers scroll past in `mosquitto_sub` and on the web page. One command that steps the limit and records the lot makes the experiment reproducible.
 
 ## Decisions (from the user, 2026-10-08)
 
-- **Time zero is the Modbus write** of the new maximum current to the charger. The user's **stepping script**, not the recorder, makes that write, and it **marks** it (below). The recorder never writes to the charger.
-- **Full-resolution events**, not the graph's 1 Hz frames.
-- **SQLite**, one file per run.
-- **Characterize the current setup, do not improve it:** no faster sampling, no fast inverter reader, **no change to the setpoint server, the inverter writer, the board or the web page**.
-- The recorder opens **no Modbus connection** and publishes nothing. The charger-side hops (the limit write to the charger's reaction, the AMTRON's own meter) are not measured by it; the first thing it sees move is the board's `evsim/cp`.
+- **Time zero is the Modbus write** of the new maximum current to the charger. The recorder makes that write itself, with the same Modbus code as the web page, and stores its exact time. No marker topic.
+- **The recorder runs the experiment** with one command. There is no separate `set-limit` command.
+- **Full-resolution events**, **SQLite**, one file per run.
+- **The charger's measurements are logged too** (signalled current, phase currents, phase voltages, total power), so power differentials can be assessed as well as delays.
+- **Characterize the current setup, do not improve it:** no faster sampling than the existing 2 s charger poll and 1 Hz inverter messages, no fast inverter reader, no change to the firmware or the web page.
+- **Cheap changes are welcome:** the setpoint server and the inverter writer get **additive timestamp fields** (below); the board's own uptime is already in every `evsim/cp` sample.
 
 ## Design
 
-### The recorder
+### The command
 
-A new package `server/evsim_recorder/`, started with `python -m evsim_recorder --db PATH` (default `data/recordings/evsim-<UTC date and time>.sqlite`). It uses `paho-mqtt` and the standard library's `sqlite3`.
+```
+python -m evsim_recorder run --steps 6,7,6,12,16,6 --dwell 60 [--repeat 1] [--db PATH] [--host H] [--port P] [--leave] [--yes]
+```
 
-- **Subscribes to `evsim/#`** at QoS 0, on the broker at `127.0.0.1:1883` (`--host`, `--port`), with a client id of `evsim-recorder-` plus a random suffix (equal ids kick each other off the broker). Subscribing happens in `on_connect`, so it is renewed on every reconnect; the connection is asynchronous, so an absent broker never blocks start-up.
-- **Stamps each message in the callback**, before anything else: `t_ns` (`time.time_ns()`, the computer's wall clock) and `mono_ns` (`time.monotonic_ns()`, immune to clock steps, for intervals within a run). Then it puts the message on a queue and returns.
-- **A writer thread** takes messages from the queue and writes them to SQLite in batches (every 0.5 s or 200 messages, one transaction each), so a slow disk never delays the MQTT callback. SQLite is opened in WAL mode, so the file can be read while a recording runs.
-- **Overflow:** the queue holds 100 000 messages. If it is ever full, the oldest are dropped and counted, and the count is stored (see `recorder_events`). A write error is logged and counted and retried with the next batch; it never raises into the MQTT thread.
-- **Stop** (Ctrl-C or SIGTERM) flushes the queue and closes the file cleanly.
+- **`--steps`**: the maximum currents to write, in order, each **0 or a whole number from 6 to 16** and not above the charger's installation limit. They are all validated before anything is written; one bad value stops the command with a message and nothing is written.
+- **`--dwell`**: seconds to hold each step (default 60), so each response settles and the steady state can be averaged. **`--repeat`**: how many times to run the whole list (default 1).
+- **`--db`**: the SQLite file; default `data/recordings/evsim-<UTC date and time>.sqlite`. **`--host`, `--port`**: the MQTT broker (default `127.0.0.1:1883`). The charger's address is `EVSIM_CHARGER_HOST`, as for the page.
+- **Safety:** the command prints the plan (the steps, the dwell, the total time, the charger's address) and the limit currently set, and **asks for confirmation** (`--yes` skips the question). At the end, or on Ctrl-C or SIGTERM, it **writes back the limit that was set when it started** (best effort, logged as a final step); `--leave` keeps the last step instead. A step of 0 A pauses charging; it is allowed when listed, and the plan says so.
+- **Only register 1000 is ever written**, with the same safety rules as the page (`WRITABLE_ADDRESS`; the operator limit, register 134, is never written; the values above).
 
-### What is stored
+It runs, in one process: the MQTT recorder, the charger poller and the step runner.
 
-Lossless first, convenient second: every message goes into one table, and views give the typed columns.
+### The MQTT recorder
+
+- Subscribes to **`evsim/#`** at QoS 0, with a client id of `evsim-recorder-` plus a random suffix (equal ids kick each other off the broker). Subscribing happens in `on_connect`, so it is renewed on every reconnect; the connection is asynchronous, so an absent broker never blocks start-up. It publishes nothing.
+- **Stamps each message in the callback**, before anything else: `t_ns` (`time.time_ns()`, the computer's wall clock) and `mono_ns` (`time.monotonic_ns()`, immune to clock steps). Then it queues the message and returns.
+
+### The charger poller
+
+The recorder reuses the page's `ChargerService` (`server/charger_web/service.py`): one Modbus connection, a read of every register every 2 s, which is also the heartbeat the charger needs (after 30 s without Modbus traffic it falls back to 0 A, so the recorder must keep polling for the whole run). Two additive changes to the service, invisible to the page:
+
+- an optional **`on_poll` callback**, called after every poll with the poll's start and end times (`time.time_ns()`), the raw register values (each phase current, each phase voltage, total power, signalled current, the limits, the states) or the error;
+- `set_limit` additionally returns **`write_sent_ns`** and **`write_acked_ns`**: the wall clock just before the write request and just after its reply.
+
+The AMTRON's meter registers (220 power, 222 to 226 voltages) are the ones the page reads; their meaning was inferred and checked on 2026-10-07.
+
+### The step runner
+
+For each step it calls `ChargerService.set_limit(value)` (write register 1000, read it back, validate) and stores one **`limit_writes`** row with `t_write_ns` (`write_sent_ns`: **time zero**), `t_ack_ns`, `from_a`, `to_a`, the read-back value, the run and step indices, a label and any error. Then it waits `--dwell` seconds. A failed write is stored with its error and stops the experiment (after restoring the original limit).
+
+### The writer and what is stored
+
+Messages go through a queue to a **writer thread** that writes SQLite in batches (every 0.5 s or 200 rows, one transaction), in WAL mode, so a slow disk never delays the MQTT callback or the poller and the file can be read while a run is in progress. The queue holds 100 000 rows; if it is ever full the oldest are dropped and counted. A write error is logged, counted and retried with the next batch.
 
 | Table | Columns |
 |---|---|
-| `sessions` | `id`, `started_ns`, `ended_ns` (set on a clean stop), `broker`, `argv`, `version` |
-| `messages` | `id`, `session_id`, `t_ns`, `mono_ns`, `topic`, `retained` (0 or 1), `payload` (the bytes, verbatim) |
-| `recorder_events` | `id`, `session_id`, `t_ns`, `kind` (`connected`, `disconnected`, `dropped`, `write_error`), `detail` |
+| `sessions` | `id`, `started_ns`, `ended_ns` (set on a clean stop), `broker`, `charger`, `plan` (the steps, dwell and repeat as JSON), `argv`, `version` |
+| `messages` | `id`, `session_id`, `t_ns`, `mono_ns`, `topic`, `retained`, `payload` (the bytes, verbatim) |
+| `charger` | `id`, `session_id`, `t_start_ns`, `t_end_ns`, `set_limit_a`, `operator_limit_a`, `installation_limit_a`, `signalled_current_a`, `vehicle_state`, `charger_status`, `i_l1_a`, `i_l2_a`, `i_l3_a`, `v_l1_v`, `v_l2_v`, `v_l3_v`, `power_w`, `error` (one row per poll, a failed poll has the error and `NULL` values) |
+| `limit_writes` | `id`, `session_id`, `run`, `step`, `t_write_ns`, `t_ack_ns`, `from_a`, `to_a`, `readback_a`, `label`, `error` (the final restore is `step = -1`, label `restore`) |
+| `recorder_events` | `id`, `session_id`, `t_ns`, `kind` (`connected`, `disconnected`, `dropped`, `write_error`, `charger_error`), `detail` |
 
-`recorder_events` matters for validity: a period when the recorder was disconnected from the broker has **no messages**, and the analysis must be able to tell that from a quiet system.
+`recorder_events` matters for validity: a period when the recorder lost the broker or the charger has no data, and the analysis must be able to tell that from a quiet system.
 
-Views (SQLite JSON functions), all with `session_id`, `t_ns` and `mono_ns`, retained messages excluded:
+Views over `messages` (SQLite JSON functions), all with `session_id`, `t_ns`, `mono_ns`, retained messages excluded; invalid JSON or a missing field gives `NULL`, never an error:
 
-- `cp`: the board's raw samples: `board_ms` (its uptime `t`), `freq`, `duty`, `adc`, `cp`, `state`, `amps`, `watts`, `setpoint_w`, `status`, `age_ms`.
-- `setpoint`: `setpoint_w`, `samples`, `window_s`, `status`, `server_ts` (the server's own, whole seconds).
-- `inverter`: `mode`, `target_dc_w`, `cap_ac_w`, `dc_w`, `dc_a`, `dc_v`, `ac_w`, `ac_a`, `ac_v`, `inverter_state`, `error`, `server_ts`.
-- `markers`: the stimulus markers, `label`, `event`, `t_write_ns`, `t_ack_ns`, `from_a`, `to_a`, `run` and the raw `payload`.
+- `cp`: `board_ms` (the board's uptime), `freq`, `duty`, `adc`, `cp`, `state`, `amps`, `watts`, `setpoint_w`, `status`, `age_ms`.
+- `setpoint`: `setpoint_w`, `samples`, `window_s`, `status`, `server_ts`, `tick_ms`.
+- `inverter`: `mode`, `target_dc_w`, `cap_ac_w`, `dc_w`, `dc_a`, `dc_v`, `ac_w`, `ac_a`, `ac_v`, `inverter_state`, `error`, `server_ts`, `read_ts_ms`, `cap_ts_ms`.
 
-A payload that is not valid JSON, or lacks a field, gives `NULL` in the view, never an error. Topics without a view (`evsim/state`, `evsim/reply`, `evsim/status`, and any future topic such as `evsim/electric_car`) are still in `messages`.
+Topics without a view (`evsim/state`, `evsim/reply`, `evsim/status`, a future `evsim/electric_car`) are still in `messages`.
 
-### The stimulus marker
+### The timestamp fields (setpoint server and inverter writer)
 
-The stepping script publishes one JSON object to **`evsim/marker`** around each write to the charger's limit register 1000:
+Additive keys in the JSON the two already publish, in epoch milliseconds from the computer's clock; nothing else about their behaviour changes:
 
-```json
-{"event":"limit_write","t_write_ns":1791369214123456789,"t_ack_ns":1791369214131000000,"from_a":6,"to_a":7,"run":3,"label":"1 A step up"}
-```
+- **`evsim/setpoint`**: `ts_ms`, the time of the server's tick that produced the message.
+- **`evsim/inverter`**: `read_ts_ms`, the time the inverter's power was read (the measurement time, not the publish time), and `cap_ts_ms`, the time of the last successful cap write (`null` before the first one).
 
-`t_write_ns` is the script's `time.time_ns()` taken just **before** the Modbus write and `t_ack_ns` just after the reply: **`t_write_ns` is time zero** of the delay. The keys are a recommendation: the recorder stores the payload verbatim and the `markers` view reads these names. The script must run on the **same computer** (one clock); from another machine, its clock offset to this one would have to be measured and removed.
+The inverter-writer spec's field table and the page's parsers (which ignore unknown fields) are not otherwise affected.
 
 ### What the timestamps mean, and their limits
 
-All delays are measured with arrival times on one computer, so they are exact for what is local and carry an error for the rest. This is documented in the README, not corrected for:
+All times come from one computer's clock, so delays are exact for what is local and carry an error for the rest. This is documented in the README, not corrected for:
 
-- `evsim/setpoint` and `evsim/inverter` come from the setpoint server on the same computer: their arrival time is accurate to about a millisecond, but their content is itself sampled (the server averages `evsim/cp` over 1 s and publishes once a second; the inverter writer reads and publishes once a second).
-- `evsim/cp` crosses the WiFi from the board: its arrival time includes a transit time that is not known and varies. The board's own uptime clock (`board_ms`, kept in the `cp` view) shows the board's sampling regularity (the 200 ms spacing), so jitter in the arrival times can be told from the board's own.
-- The charger's reaction to the register write (the pilot duty changing) is inside the first delay: the recorder sees it only as the first `evsim/cp` sample that differs.
+- `evsim/setpoint` and `evsim/inverter` come from the setpoint server on the same computer: arrival is accurate to about a millisecond, and the new `ts_ms`, `read_ts_ms` and `cap_ts_ms` give the server's own times. Their content is sampled: the server averages `evsim/cp` over 1 s and publishes once a second; the inverter writer reads and publishes once a second.
+- `evsim/cp` crosses the WiFi from the board: its arrival time includes a transit time that is not known and varies. The board's uptime (`board_ms`) shows its sampling regularity.
+- The charger's own readings (`charger` table) are one poll every **2 s**, each poll a few milliseconds long: the signalled current and the meter resolve the charger's side of a step to about 2 s. They suit the **steady-state** comparisons (power at each current) well; for delays, the first sample that moves is `evsim/cp`.
+- Time zero (`t_write_ns`) is exact: the same process writes the register and reads the clock.
+
+### Running next to the web page
+
+The page's service **re-writes the limit last set with Apply** if the charger reports a different one, so a recorder run would be undone within seconds if the page had one. The README says: do not press Apply during a run, or restart the page first (a fresh page has no remembered limit and never writes by itself). Both can poll the charger side by side.
 
 ### Files and housekeeping
 
-`data/recordings/` is git-ignored (`*.sqlite`, `*.sqlite-wal`, `*.sqlite-shm`). At about 7 messages a second a run produces roughly 150 MB a day, so it is meant to run for the length of an experiment, one file per run. `server/README.md` gains a section: how to start it, the marker format with a short Python snippet for the stepping script, the views, and an example query (delay from a marker to the first `cp` sample whose `setpoint_w` differs by more than a threshold) with pandas.
+`data/recordings/` is git-ignored (`*.sqlite`, `*.sqlite-wal`, `*.sqlite-shm`). About 7 messages a second plus one charger row every 2 s is roughly 150 MB a day; a run is meant to last the length of an experiment. `server/README.md` gains a section: the command, the safety behaviour, the tables and views, the limits above, and two example queries with pandas: the delay from a `limit_writes.t_write_ns` to the first `cp`, `setpoint` and `inverter` rows that differ from their value before the write by more than a threshold, and the mean charger, DC and AC power over the last 20 s of each step.
 
 ## Error handling
 
 | Situation | Behaviour |
 |---|---|
-| Broker down at start-up | The recorder starts, records a `disconnected`/`connected` event pair when it comes up, and keeps retrying. |
-| Broker drops during a run | `disconnected` and `connected` events bracket the gap; paho reconnects. |
-| Slow or full disk | Writes retry with the next batch; after 100 000 queued messages the oldest are dropped and a `dropped` event records how many. The callback never blocks. |
-| Database file cannot be created | The process exits at start with a clear message. |
+| A bad or out-of-range step, or an unreadable plan | Refused at start, nothing written, a clear message. |
+| Confirmation declined | Nothing written. |
+| Charger unreachable at start | The command stops with a message before writing anything. |
+| Charger unreachable mid-run | `charger_error` events and error rows; the run stops after a failed write; the original limit is restored if the charger comes back. |
+| Broker down at start-up or during the run | The recorder starts and keeps retrying; `disconnected` and `connected` events bracket the gap; the step runner and the charger poll carry on. |
+| Slow or full disk | Writes retry with the next batch; after 100 000 queued rows the oldest are dropped and a `dropped` event records how many. Callbacks never block. |
+| Ctrl-C, SIGTERM | The original limit is written back (unless `--leave`), the queue is flushed, the session's `ended_ns` is set. |
 | Malformed message | Stored verbatim in `messages`; its view columns are `NULL`. |
-| Marker with unexpected keys | Stored verbatim; the `markers` view fills what it finds. |
-| Recorder stopped mid-batch | The queue is flushed first; a killed process loses at most the last 0.5 s batch, and WAL keeps the file consistent. |
+| Database file cannot be created | The process exits at start with a clear message. |
 
 ## Testing
 
-All with the standard `unittest`, the existing `FakeMqttClient` and a temporary SQLite file.
+All with the standard `unittest`, the existing `FakeAmtron` and `FakeMqttClient`, injected clocks and a temporary SQLite file.
 
-- **Capture:** a message delivered to the callback is stored with the injected clock's `t_ns` and `mono_ns`, its topic, its `retained` flag and its exact bytes; subscription to `evsim/#` is renewed on a second `on_connect`; the client id is unique.
-- **Views:** `cp`, `setpoint`, `inverter` and `markers` give the right typed columns from real payloads (including the new `dc_a`, `dc_v`, `ac_a`, `ac_v`); invalid JSON, a missing field and a non-object give `NULL`, not an error; retained messages are left out of the views but kept in `messages`; an unknown topic is in `messages` only.
-- **Writer:** batches commit on size and on time; a stop flushes everything; the callback stays fast while the writer is blocked; overflow drops the oldest and records a `dropped` event with the count; a failing write is retried and recorded as `write_error`, and the callback thread never raises.
-- **Validity events:** disconnect and reconnect produce `recorder_events` rows; a session row gets `ended_ns` on a clean stop.
-- **Concurrent read:** a second connection can read the file while the recorder writes (WAL).
-- **Read-only:** the recorder publishes nothing and opens no Modbus connection (the fake records every publish; the test asserts none).
-- **Entry point:** a database path that cannot be created exits with a message; `--db` and `--host` are honoured.
-- **Live check** (after the suite, against the real rig, changing nothing): run the recorder for about two minutes; publish two test markers with `mosquitto_pub`; check that `cp` rows arrive at about 5 per second with `board_ms` steps of about 200, that `setpoint` and `inverter` arrive about once a second, that the `markers` view reads the test markers, and run the example delay query on one marker. A step on the rig is **not** part of the check (the user's script does that later).
+- **Plan and safety:** steps outside 0 or 6 to 16, above the installation limit or not whole numbers are refused before any write; declining the confirmation writes nothing; the fake records only writes to register 1000 and never to 134; a step of 0 is allowed and flagged in the plan.
+- **Steps:** the steps are written in order, repeated `--repeat` times, each held for the dwell; each `limit_writes` row has `t_write_ns` before `t_ack_ns`, the right `from_a`, `to_a` and read-back; a refused or unconfirmed write is stored with its error and stops the run.
+- **Restore:** the original limit is written back at the end, on Ctrl-C and on SIGTERM (`step = -1`), and not with `--leave`.
+- **Charger poll:** each poll becomes a `charger` row with the raw phase values, `t_start_ns` before `t_end_ns`; a failed poll is an error row plus a `charger_error` event; the poll keeps running during a dwell (the fake's 30 s fallback is never reached).
+- **MQTT capture:** a message is stored with the injected `t_ns` and `mono_ns`, topic, `retained` flag and exact bytes; the subscription to `evsim/#` is renewed on a second `on_connect`; the client id is unique; nothing is ever published.
+- **Views:** `cp`, `setpoint` and `inverter` give the typed columns from real payloads, including the new `ts_ms`, `read_ts_ms` and `cap_ts_ms`; invalid JSON, a missing field and a non-object give `NULL`; retained messages are in `messages` only.
+- **Writer:** batches commit on size and on time; a stop flushes everything; the callback stays fast while the writer is blocked; overflow drops the oldest and records a `dropped` event with the count; a failing write is retried and recorded, and no thread raises.
+- **Validity events:** disconnect and reconnect produce `recorder_events` rows; `ended_ns` is set on a clean stop; a second connection can read the file while it is written (WAL).
+- **Setpoint server and inverter writer:** `evsim/setpoint` carries `ts_ms` (epoch milliseconds of the tick, from the injected clock); `evsim/inverter` carries `read_ts_ms` after the read and `cap_ts_ms` after a successful cap write, `null` before the first; every existing field and test is unchanged.
+- **Charger service:** `on_poll` receives the timings and the values; `set_limit` returns the two write times; the page's existing tests pass unchanged.
+- **Live check** (after the suite, on the real rig): restart the setpoint server from the branch; run the recorder with a short plan, for example `--steps 10,11,10 --dwell 45 --yes`, a **1 A step only**, nothing larger, and confirm that the original limit is back at the end; check the tables fill at the expected rates (`cp` about 5 a second with `board_ms` steps near 200, `setpoint` and `inverter` about 1 a second, `charger` one every 2 s), that the new timestamps are present, and run the example delay query on one step. Larger jumps are left to the user's own runs.
 
 ## Not in scope
 
-Any change to the setpoint server, the inverter writer, the firmware or the web page; faster or additional sampling of the charger or the inverter; reading the AMTRON's register or meter; the stepping script; computing the delays (the data and an example query are provided); InfluxDB or any other database; a user interface; clock synchronization across machines.
+Any change to the firmware or the web page; any sampling faster than the existing 2 s charger poll and 1 Hz inverter messages; a fast inverter reader; computing the delays and differentials (the data and example queries are provided); InfluxDB or any other database; a user interface; clock synchronization across machines; stepping the pilot state; writing any register other than 1000.

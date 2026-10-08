@@ -35,8 +35,15 @@ Lower currents are better for characterizing the chain.)
 - **First change after each write (three 1 A steps):** `cp` 0.14 to 0.26 s, `setpoint` 0.35 to 0.54 s, `inverter.dc_w` about
   0.87 s (the second step is lost in the saturated inverter's noise), charger signalled current 1 to 3 s (its poll cycle).
 - **Two Modbus clients break the charger polls:** with the page running, 32 of 99 polls failed (reset every ~4.5 s), at 1 s and
-  at 2 s alike; stopped, 0 of 27, 0 of 15 and, in a full run, 0 of 91. A poll of 13 requests takes 0.7 s, so the cycle at
-  `--charger-period 1` is about 1.7 s. The recorder now warns at the end of a run if more than 5 % of polls failed.
+  at 2 s alike; stopped, 0 of 27, 0 of 15 and, in a full run, 0 of 91. A poll of 13 requests takes 0.7 s; the service used to wait the period after each poll (a 1.7 s cycle at
+  `--charger-period 1`), since 2026-10-08 it counts start to start, so the cycle is the period. The recorder now warns at the end of a run if more than 5 % of polls failed.
 - **Fixed by the check:** the spec and README had said the page and the recorder could poll side by side.
 - **Not checked:** jumps larger than 1 A (left to the user's own runs); the page's 8080 process was restarted fresh (it had
   remembered 15 A from an Apply, which would have fought the steps).
+
+## Poll cadence, 2026-10-08
+
+`ChargerService` now polls start to start: `POLL_PERIOD_S` is 1 (it was 2) for the page and the recorder, the browser fetches the
+charger status every second, and the footer says "Readings refresh every second." Read-only on the rig (page stopped): 61 polls at
+a 1.0 s cadence and 51 at 0.8 s, none failed (a poll takes 0.63 to 0.75 s). A poll is followed by at least 0.1 s of quiet. Reading
+the registers in blocks (the meter's 16 in one request) would halve the 13 requests per poll; not done.

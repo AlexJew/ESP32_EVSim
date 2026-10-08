@@ -150,6 +150,14 @@ class PageTest(unittest.TestCase):
         weight = lambda selector: re.search(r"%s\s*\{[^}]*?font-weight:\s*([^;]+);" % re.escape(selector), css).group(1)
         self.assertEqual(weight(".limit-value"), weight("dd"))
 
+    def test_the_readings_refresh_every_second_and_the_footer_says_so(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        app = script_text("app.js")
+        self.assertIn("Readings refresh every second.", html)
+        self.assertIn("Readings refresh every second.", app)
+        self.assertNotIn("every 2 seconds", html + app)
+        self.assertIn("window.setInterval(() => void refresh(), 1000);", app)          # the charger status, once a second
+
     def test_the_chart_offers_power_current_and_voltage(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         start = html.index('id="chart-unit"')

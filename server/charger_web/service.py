@@ -256,12 +256,24 @@ class ChargerService:
         self._thread.start()
 
     def _run(self):
+        """Poll every `period` seconds, counted from the start of one poll to the start of the next.
+
+        A poll of 13 requests takes about 0.7 s on the real charger, so waiting the period after each poll would make a
+        1 s poll come every 1.7 s. A poll that takes longer than the period is followed after a short idle (the charger
+        always gets a moment of quiet), never by a burst of catch-up polls.
+        """
+        idle = min(0.1, self._period / 2)
+        next_start = time.monotonic()
         while not self._stop.is_set():
             try:
                 self.poll_once()
             except Exception:             # one bad poll must never stop the heartbeat
                 log.exception("charger poll failed")
-            self._stop.wait(self._period)
+            next_start += self._period
+            now = time.monotonic()
+            if next_start - now < idle:
+                next_start = now + idle
+            self._stop.wait(next_start - now)
 
     def stop(self):
         """Stop the poller (if it is running) and close the connection."""

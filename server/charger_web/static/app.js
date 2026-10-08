@@ -19,7 +19,7 @@ function updateConnection(status, error) {
     unavailable: "Charger unavailable",
   };
   badge.textContent = labels[status] || "Charger status unknown";
-  el("last-updated").textContent = error || "Readings refresh every 2 seconds.";
+  el("last-updated").textContent = error || "Readings refresh every second.";
 }
 
 function meanOf(values) {
@@ -219,4 +219,4 @@ form.addEventListener("submit", (event) => event.preventDefault());
 el("refresh").addEventListener("click", () => void refresh());
 showLimit();
 void refresh();
-window.setInterval(() => void refresh(), 2000);
+window.setInterval(() => void refresh(), 1000);

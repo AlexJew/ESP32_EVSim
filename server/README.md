@@ -44,7 +44,7 @@ Open `http://127.0.0.1:8080/`. `EVSIM_CHARGER_HOST` overrides the charger addres
 
 How it works, and what to know:
 
-- A background poller reads the charger every 2 s. That is also the heartbeat the charger needs: after 30 s without
+- A background poller reads the charger once a second (a poll starts every second, a poll of 13 requests takes about 0.7 s). That is also the heartbeat the charger needs: after 30 s without
   Modbus traffic it drops to 0 A, so if this process stops, charging stops within 30 s.
 - "Maximum current" writes register 1000 (0 A pauses; otherwise 6 to 16 A). The AMTRON's own operator limit
   (register 134, set on its page) is a ceiling: the effective limit is the lower of the two.
@@ -133,7 +133,7 @@ change of the limit takes to reach each hop, and the power at each current.
 It prints the plan and asks for confirmation (`--yes` skips the question). Options: `--dwell` seconds per step (60),
 `--repeat` runs of the list (1), `--baseline` seconds recorded before the first write (10), `--db PATH` (default
 `data/recordings/evsim-<UTC time>.sqlite`, git-ignored), `--host`/`--port` for the broker, `--charger-period` seconds
-between charger polls (1 to 10, default 1), `--leave` to keep the last step.
+between the starts of two charger polls (1 to 10, default 1), `--leave` to keep the last step.
 
 - **Safety:** it writes only register 1000, only 0 or 6 to 16 A and not above the installation limit, and checks the
   whole list before writing anything. The limit found at the start is written back at the end and on Ctrl-C, SIGTERM or
@@ -152,7 +152,7 @@ between charger polls (1 to 10, default 1), `--leave` to keep the last step.
 - **Resolution:** `evsim/cp` is 5 Hz and crosses the WiFi (its arrival time includes a transit time that is not
   known; `board_ms` is the board's own uptime and shows its 200 ms rhythm); `evsim/setpoint` and `evsim/inverter` are
   1 Hz from the setpoint server, with their own times in `tick_ms`, `read_ts_ms` and `cap_ts_ms`; the charger is polled
-  with a 1 s pause between polls of about 0.7 s each, so a `charger` row comes about every 1.7 s. All times are one
+  with a poll starting every second (each takes about 0.7 s), so a `charger` row comes every second. All times are one
   computer's clock.
 
 Example (pandas): the delay from each write to the first `cp` sample whose setpoint moved by more than 50 W, and the

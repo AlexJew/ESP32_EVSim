@@ -368,6 +368,55 @@ class RestoreTest(ServiceTest):
         self.assertFalse(self.service.status()["paused"])
 
 
+class CadenceTest(unittest.TestCase):
+    """The poll period is the time from the start of one poll to the start of the next. Measured on the rig on 2026-10-08:
+    a poll of 13 requests takes 0.7 s, so waiting the period after each poll made a "1 s" poll come every 1.7 s."""
+
+    def setUp(self):
+        self.fake = FakeAmtron()
+        self.port = self.fake.start()
+        self.addCleanup(self.fake.stop)
+        self.polls = []
+
+    def run_for(self, seconds, period):
+        service = ChargerService("127.0.0.1", self.port, period_s=period, on_poll=self.polls.append)
+        self.addCleanup(service.stop)
+        service.start()
+        time.sleep(seconds)
+        service.stop()
+        starts = [p["t_start_ns"] / 1e9 for p in self.polls]
+        ends = [p["t_end_ns"] / 1e9 for p in self.polls]
+        return starts, ends
+
+    def test_polls_start_every_period_even_though_a_poll_takes_a_good_part_of_it(self):
+        self.fake.delay_s = 0.01                                   # 13 requests: about 0.13 s a poll
+        starts, ends = self.run_for(2.2, 0.4)
+        gaps = [b - a for a, b in zip(starts, starts[1:])]
+        self.assertGreaterEqual(len(starts), 5)
+        for gap in gaps:
+            self.assertAlmostEqual(gap, 0.4, delta=0.08)           # not 0.53, which is poll plus period
+
+    def test_the_default_period_is_one_second(self):
+        self.assertEqual(config.POLL_PERIOD_S, 1)
+
+    def test_a_poll_longer_than_the_period_is_followed_after_a_short_idle_not_in_a_burst(self):
+        self.fake.delay_s = 0.05                                   # about 0.65 s a poll
+        starts, ends = self.run_for(3.0, 0.2)
+        idle = [start - end for end, start in zip(ends, starts[1:])]
+        self.assertGreaterEqual(len(starts), 3)
+        for pause in idle:
+            self.assertGreaterEqual(pause, 0.08)                   # the charger always gets a moment of quiet
+            self.assertLess(pause, 0.3)                            # but the next poll is not delayed by a whole period
+
+    def test_stop_ends_the_wait_between_polls_at_once(self):
+        service = ChargerService("127.0.0.1", self.port, period_s=10, on_poll=self.polls.append)
+        service.start()
+        time.sleep(0.3)
+        started = time.monotonic()
+        service.stop()
+        self.assertLess(time.monotonic() - started, 2)
+
+
 class PollReportTest(unittest.TestCase):
     def setUp(self):
         self.fake = FakeAmtron()

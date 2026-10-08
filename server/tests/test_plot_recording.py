@@ -118,6 +118,7 @@ class SyntheticRecording(unittest.TestCase):
         self.assertAlmostEqual(first["charger_w"], 5000, delta=1)
         self.assertAlmostEqual(first["dc_w"], 4700, delta=1)
         self.assertAlmostEqual(first["ac_w"], 4600, delta=1)
+        self.assertAlmostEqual(first["setpoint_w"], 4700, delta=1)
         self.assertEqual(len(powers), 2)
 
     def test_a_recording_with_no_writes_gives_empty_results_not_an_error(self):

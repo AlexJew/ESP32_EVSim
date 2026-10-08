@@ -74,7 +74,7 @@ def analyse(path):
         before, tail = t0 - int(BASELINE_S * NS), end - int(SETTLED_S * NS)
         powers.append({"run": run, "step": step, "from_a": from_a, "to_a": to_a,
                        "charger_w": level_mean(charger, tail, end), "dc_w": level_mean(inverter, tail, end),
-                       "ac_w": level_mean(ac, tail, end), "charger_sd": level_sd(charger, tail, end),
+                       "ac_w": level_mean(ac, tail, end), "setpoint_w": level_mean(server, tail, end), "charger_sd": level_sd(charger, tail, end),
                        "dc_sd": level_sd(inverter, tail, end), "ac_sd": level_sd(ac, tail, end)})
         times, reason = [], None
         for name, rows in (("board", cp), ("server", server), ("inverter", inverter)):
@@ -162,20 +162,38 @@ def plot_power(result, out):
     for p in result["powers"]:
         by_amp.setdefault(p["to_a"], []).append(p)
     amps = sorted(by_amp)
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    right = ax.twinx()
+
+    def mean_of(key, a):
+        values = [p[key] for p in by_amp[a] if p[key] is not None]
+        return statistics.fmean(values) if values else None
+
+    ev = [(a, mean_of("setpoint_w", a)) for a in amps if mean_of("setpoint_w", a) is not None]
+    if ev:
+        ax.plot([a for a, _ in ev], [w for _, w in ev], label="EV setpoint", color="#176b4a", marker="s", linewidth=2)
     for key, sd, label, color in (("charger_w", "charger_sd", "Car charger", "#c27b14"), ("dc_w", "dc_sd", "Inverter DC input", "#2a5fa8"),
                                   ("ac_w", "ac_sd", "Inverter AC output", "#7b4fa3")):
-        points = [(a, statistics.fmean(p[key] for p in by_amp[a] if p[key] is not None),
-                   statistics.fmean(p[sd] for p in by_amp[a])) for a in amps if any(p[key] is not None for p in by_amp[a])]
-        if points:
-            ax.errorbar([a for a, _, _ in points], [w for _, w, _ in points], yerr=[s for _, _, s in points], label=label,
-                        color=color, marker="o", capsize=3, linewidth=2)
+        points = [(a, mean_of(key, a), mean_of(sd, a), mean_of("setpoint_w", a)) for a in amps if mean_of(key, a) is not None]
+        if not points:
+            continue
+        ax.plot([a for a, *_ in points], [w for _, w, *_ in points], label=label, color=color, marker="o", linewidth=2)
+        errors = [(a, w - target) for a, w, _, target in points if target is not None]
+        if errors:
+            right.plot([a for a, _ in errors], [e for _, e in errors], color=color, linestyle="--", linewidth=1.2, alpha=0.8)
+        right.plot([a for a, *_ in points], [j for _, _, j, _ in points], color=color, linestyle=":", linewidth=1.6, alpha=0.9)
     ax.set_xlabel("Current limit written to the charger (A)")
     ax.set_ylabel("Power (W), mean of the last %d s of each step" % SETTLED_S)
+    right.set_ylabel("Error (dashed) and jitter (dotted), W")
+    right.axhline(0, color="#999999", linewidth=0.6)
     ax.set_xticks(amps)
     ax.set_ylim(bottom=0)
     ax.grid(color="#dce4df")
-    ax.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    from matplotlib.lines import Line2D
+    handles += [Line2D([], [], color="#555555", linestyle="--"), Line2D([], [], color="#555555", linestyle=":")]
+    labels += ["Error: measurement minus EV setpoint (right axis)", "Jitter: standard deviation over the same 10 s (right axis)"]
+    ax.legend(handles, labels, loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)

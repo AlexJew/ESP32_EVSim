@@ -149,6 +149,8 @@ setpoint:
 | `dc_w`, `ac_w` | The inverter's measured MPPT 1 DC power and AC power, or `null` if unreadable |
 | `dc_a`, `dc_v` | MPPT 1's DC current and voltage, or `null` (added 2026-10-07) |
 | `ac_a`, `ac_v` | The mean of the three AC phase currents and of the three phase-to-neutral voltages, or `null` (added 2026-10-07) |
+| `read_ts_ms` | Epoch milliseconds right after the inverter's power was read (the measurement time), or `null` when it could not be read (added 2026-10-08) |
+| `cap_ts_ms` | Epoch milliseconds of the last successful cap write, or `null` before the first (added 2026-10-08) |
 | `inverter_state` | The SunSpec state (4 = MPPT, 8 = STANDBY, 3 = STARTING, 1 = OFF), or `null` |
 | `error` | The last error text, or `null` |
 | `ts` | Server UTC time, ISO 8601 |

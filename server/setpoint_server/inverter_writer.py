@@ -49,6 +49,8 @@ class InverterWriter:
         self._starting = False
         self._starting_since = None
         self._cap_ac_w = None
+        self._read_ts_ms = None           # epoch ms right after the last power read
+        self._cap_ts_ms = None            # epoch ms of the last successful cap write
         self._last_error = None
         self._retry_at = 0.0
         self._backoff = config.BACKOFF_MIN_S
@@ -121,6 +123,7 @@ class InverterWriter:
             if self._stop.is_set():
                 return
             power = inv.power()
+            self._read_ts_ms = self._now_ms()
             if self._starting and power["state"] == MPPT:
                 self._starting = False
             self._last_error = None
@@ -128,6 +131,9 @@ class InverterWriter:
             self._publish_status(power)
         except Exception as exc:          # keep the thread alive whatever goes wrong
             self._fail(now, exc)
+
+    def _now_ms(self):
+        return int(self._utcnow().timestamp() * 1000)
 
     def _current_target(self, now):
         with self._lock:
@@ -150,6 +156,7 @@ class InverterWriter:
         if action.kind == "cap":
             inv.set_dc_target(action.dc_w)
             self._cap_ac_w = ac_cap_for_dc(action.dc_w)
+            self._cap_ts_ms = self._now_ms()
         elif action.kind == "standby":
             inv.set_conn(0)
         elif action.kind == "resume":
@@ -221,6 +228,8 @@ class InverterWriter:
             "inverter_state": power["state"] if power else None,
             "error": self._last_error,
             "ts": self._utcnow().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "read_ts_ms": self._read_ts_ms if power else None,
+            "cap_ts_ms": self._cap_ts_ms,
         }, separators=(",", ":"))
         try:
             self._publish(payload)

@@ -10,6 +10,7 @@ REAL_CP = (
     '"amps":14.58,"watts":10060,"setpoint_w":10060,"status":"live","age_ms":0}'
 )
 NOW = datetime(2026, 9, 30, 13, 42, 7, 123456, tzinfo=timezone.utc)
+NOW_MS = 1790775727123          # the same instant in epoch milliseconds
 
 
 class ParseCpTest(unittest.TestCase):
@@ -58,7 +59,7 @@ class FormatSetpointTest(unittest.TestCase):
         self.assertEqual(
             format_setpoint(5, 10060.0, 1, NOW),
             '{"setpoint_w":10060,"samples":5,"window_s":1,"status":"ok",'
-            '"ts":"2026-09-30T13:42:07Z"}',
+            '"ts":"2026-09-30T13:42:07Z","ts_ms":%d}' % NOW_MS,
         )
 
     def test_half_rounds_up(self):
@@ -72,8 +73,16 @@ class FormatSetpointTest(unittest.TestCase):
         self.assertEqual(
             format_setpoint(0, None, 1, NOW),
             '{"setpoint_w":0,"samples":0,"window_s":1,"status":"no_data",'
-            '"ts":"2026-09-30T13:42:07Z"}',
+            '"ts":"2026-09-30T13:42:07Z","ts_ms":%d}' % NOW_MS,
         )
+
+    def test_ts_ms_is_the_epoch_in_milliseconds_whatever_the_timezone(self):
+        local = datetime(2026, 9, 30, 15, 42, 7, 123456, tzinfo=timezone(timedelta(hours=2)))
+        self.assertEqual(json.loads(format_setpoint(1, 100.0, 1, local))["ts_ms"], NOW_MS)
+        self.assertEqual(json.loads(format_setpoint(1, 100.0, 1, NOW))["ts_ms"], NOW_MS)
+
+    def test_the_offline_message_has_no_timestamp(self):
+        self.assertNotIn("ts_ms", json.loads(offline_payload(1)))
 
     def test_ts_is_converted_to_utc(self):
         local = datetime(2026, 9, 30, 15, 42, 7, tzinfo=timezone(timedelta(hours=2)))

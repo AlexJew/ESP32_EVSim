@@ -26,11 +26,11 @@ The thesis chain turns a current limit written to the AMTRON into a load on the 
 ### The command
 
 ```
-python -m evsim_recorder run --steps 6,7,6,12,16,6 --dwell 60 [--repeat 1] [--db PATH] [--host H] [--port P] [--charger-period 1] [--leave] [--yes]
+python -m evsim_recorder run --steps 6,7,6,12,16,6 --dwell 60 [--repeat 1] [--baseline 10] [--db PATH] [--host H] [--port P] [--charger-period 1] [--leave] [--yes]
 ```
 
 - **`--steps`**: the maximum currents to write, in order, each **0 or a whole number from 6 to 16** and not above the charger's installation limit. They are all validated before anything is written; one bad value stops the command with a message and nothing is written.
-- **`--dwell`**: seconds to hold each step (default 60), so each response settles and the steady state can be averaged. **`--repeat`**: how many times to run the whole list (default 1).
+- **`--dwell`**: seconds to hold each step (default 60), so each response settles and the steady state can be averaged. **`--repeat`**: how many times to run the whole list (default 1). **`--baseline`**: seconds of recording before the first write (default 10), so the value before the first step is measured too.
 - **`--db`**: the SQLite file; default `data/recordings/evsim-<UTC date and time>.sqlite`. **`--host`, `--port`**: the MQTT broker (default `127.0.0.1:1883`). The charger's address is `EVSIM_CHARGER_HOST`, as for the page. **`--charger-period`**: seconds between charger polls, 1 to 10 (default 1).
 - **Safety:** the command prints the plan (the steps, the dwell, the total time, the charger's address) and the limit currently set, and **asks for confirmation** (`--yes` skips the question). At the end, or on Ctrl-C or SIGTERM, it **writes back the limit that was set when it started** (best effort, logged as a final step); `--leave` keeps the last step instead. A step of 0 A pauses charging; it is allowed when listed, and the plan says so.
 - **Only register 1000 is ever written**, with the same safety rules as the page (`WRITABLE_ADDRESS`; the operator limit, register 134, is never written; the values above).
@@ -65,7 +65,7 @@ Messages go through a queue to a **writer thread** that writes SQLite in batches
 | `messages` | `id`, `session_id`, `t_ns`, `mono_ns`, `topic`, `retained`, `payload` (the bytes, verbatim) |
 | `charger` | `id`, `session_id`, `t_start_ns`, `t_end_ns`, `set_limit_a`, `operator_limit_a`, `installation_limit_a`, `signalled_current_a`, `vehicle_state`, `charger_status`, `i_l1_a`, `i_l2_a`, `i_l3_a`, `v_l1_v`, `v_l2_v`, `v_l3_v`, `power_w`, `error` (one row per poll, a failed poll has the error and `NULL` values) |
 | `limit_writes` | `id`, `session_id`, `run`, `step`, `t_write_ns`, `t_ack_ns`, `from_a`, `to_a`, `readback_a`, `label`, `error` (the final restore is `step = -1`, label `restore`) |
-| `recorder_events` | `id`, `session_id`, `t_ns`, `kind` (`connected`, `disconnected`, `dropped`, `write_error`, `charger_error`), `detail` |
+| `recorder_events` | `id`, `session_id`, `t_ns`, `kind` (`connected`, `disconnected`, `dropped`, `write_error`, `charger_error`, `charger_ok`, `restore_skipped`), `detail` |
 
 `recorder_events` matters for validity: a period when the recorder lost the broker or the charger has no data, and the analysis must be able to tell that from a quiet system.
 

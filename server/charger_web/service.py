@@ -43,11 +43,12 @@ class LimitValidationError(ChargerError):
 
 
 class ChargerService:
-    def __init__(self, host=None, port=None, register_map=None, clock=time.monotonic, period_s=None):
+    def __init__(self, host=None, port=None, register_map=None, clock=time.monotonic, period_s=None, on_poll=None):
         self.map = register_map if register_map is not None else load_map()
         self._registers = self.map["registers"]
         self._clock = clock
         self._period = config.POLL_PERIOD_S if period_s is None else period_s
+        self._on_poll = on_poll                # called after every poll (the recorder logs from it)
         self._modbus = ModbusTcp(
             host or config.charger_host(), port or config.MODBUS_PORT,
             int(self.map.get("unit", 255)), config.MODBUS_TIMEOUT_S,
@@ -81,6 +82,7 @@ class ChargerService:
         """Read every register once and update the cache."""
         with self._io_lock:
             values, error = {}, None
+            t_start_ns = time.time_ns()
             for name in READ_ORDER:
                 try:
                     values[name] = self._read_register(name)
@@ -89,6 +91,7 @@ class ChargerService:
                     break                     # the connection is suspect; the older values simply go stale
                 except ModbusError:
                     values[name] = None       # this register is refused; the others still read
+            t_end_ns = time.time_ns()
             now = self._clock()
             with self._cache_lock:
                 self._error = error
@@ -103,6 +106,16 @@ class ChargerService:
                     self._signalled_wait = None     # a new value has been read, or it is simply not going to change
             if error is None:
                 self._restore_if_needed(now)
+            self._report_poll(t_start_ns, t_end_ns, values, error)
+
+    def _report_poll(self, t_start_ns, t_end_ns, values, error):
+        if self._on_poll is None:
+            return
+        try:
+            self._on_poll({"t_start_ns": t_start_ns, "t_end_ns": t_end_ns, "error": error,
+                           "values": {name: values.get(name) for name in READ_ORDER}})
+        except Exception:                      # a logger must never break the heartbeat
+            log.exception("the poll callback failed")
 
     def _link(self, now):
         if self._last_ok is None:
@@ -212,7 +225,9 @@ class ChargerService:
         with self._io_lock:
             sent = False
             try:
+                write_sent_ns = time.time_ns()
                 self._modbus.write_single(self._registers["set_limit_a"]["address"], value)
+                write_acked_ns = time.time_ns()
                 sent = True
                 confirmed = self._read_register("set_limit_a")
             except ModbusError as exc:
@@ -230,7 +245,8 @@ class ChargerService:
                 # poll reads a new one (see poll_once); until then an old 0 must not count as "paused".
                 self._signalled_wait = {"before": self._values["signalled_current_a"], "since": now}
                 self._desired = value
-        return {"success": True, "set_limit_a": confirmed, "updated_at": self._timestamp(now)}
+        return {"success": True, "set_limit_a": confirmed, "updated_at": self._timestamp(now),
+                "write_sent_ns": write_sent_ns, "write_acked_ns": write_acked_ns}
 
     # -- the poller thread -------------------------------------------------------------------
 

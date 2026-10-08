@@ -16,6 +16,10 @@ from charger_web.service import ChargerError
 
 log = logging.getLogger("evsim_recorder.experiment")
 
+RESTORE_ATTEMPTS = 5          # tries to write the first limit back before giving up and saying so
+RESTORE_PAUSE_S = 2.0         # between two tries
+UNSET = object()              # "read the limit from the charger service" (the default for `original`)
+
 
 class PlanError(ValueError):
     """The plan cannot be run: nothing has been written."""
@@ -56,7 +60,12 @@ def describe(steps, dwell_s, repeat, baseline_s, current_limit, charger_host, le
 
 
 class Experiment:
-    def __init__(self, service, store, steps, dwell_s, repeat=1, baseline_s=0, leave=False, stop=None, clock_ns=time.time_ns):
+    def __init__(self, service, store, steps, dwell_s, repeat=1, baseline_s=0, leave=False, stop=None, clock_ns=time.time_ns,
+                 original=UNSET):
+        self._original_arg = original
+        self.original = None            # the limit found at the start, the one that is restored
+        self.last_tried = None          # the last value a write was attempted with
+        self.restore_ok = None          # True: restored, or nothing to restore; False: could not be written back
         self._service = service
         self._store = store
         self._steps = list(steps)
@@ -73,6 +82,8 @@ class Experiment:
     def _write(self, run, step, from_a, to_a, label):
         """One limit write, logged. True if it was confirmed."""
         before = self._clock_ns()
+        if step >= 0:
+            self.last_tried = to_a          # the last experiment value a write was attempted with (not a restore)
         try:
             result = self._service.set_limit(to_a)
         except ChargerError as exc:
@@ -84,18 +95,32 @@ class Experiment:
         return True
 
     def _restore(self, original, current, force=False):
-        """Write the first limit back. `force` after a failed write: the charger may hold the new value, so restore even
-        if the last confirmed value was the original, and even with --leave."""
+        """Write the first limit back, trying a few times. `force` after a failed write: the charger may hold the new value,
+        so restore even if the last confirmed value was the original, and even with --leave. Sets `restore_ok`."""
         if not force and (self._leave or current == original):
+            self.restore_ok = True
             return
         if original is None:
-            self._store.add_event("restore_skipped", "the limit set at the start could not be read")
+            self._store.add_event("restore_skipped", "the limit set at the start is unknown")
+            self.restore_ok = False
             return
-        self._write(0, -1, current, original, "restore")
+        for attempt in range(RESTORE_ATTEMPTS):
+            if self._write(0, -1, current, original, "restore"):
+                self.restore_ok = True
+                return
+            if attempt + 1 < RESTORE_ATTEMPTS:
+                time.sleep(RESTORE_PAUSE_S)
+        self.restore_ok = False
+        self._store.add_event("restore_failed", f"the charger may still hold {self.last_tried} A; the limit set at the start was {original} A")
 
     def run(self):
         """Run the plan. True if every step was written and held; False if it was stopped or a write failed."""
-        original = self._service.status()["set_limit_a"]["value"]
+        original = self._service.status()["set_limit_a"]["value"] if self._original_arg is UNSET else self._original_arg
+        self.original = original
+        if original is None and not self._leave:
+            self._store.add_event("refused", "the limit set at the start is unknown, so it could not be restored: nothing was written")
+            self.restore_ok = True                  # nothing was written, nothing to restore
+            return False
         current = original
         uncertain = False
         try:

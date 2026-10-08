@@ -81,6 +81,26 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(kind, "disconnected")
         self.assertIn("refused", detail)
 
+    def test_a_broker_that_cannot_be_reached_is_one_event_per_streak_not_one_per_retry(self):
+        for _ in range(5):
+            self.client.fail_to_connect()
+        self.client.connect()
+        self.client.drop()
+        self.client.fail_to_connect()
+        self.client.fail_to_connect()
+        self.settle()
+        details = self.query("SELECT kind, detail FROM recorder_events ORDER BY id")
+        # one event for the first streak, "connected", one for the drop; the failures that follow a drop are the same gap
+        self.assertEqual([k for k, d in details], ["disconnected", "connected", "disconnected"])
+        self.assertIn("reach", details[0][1])
+
+    def test_wait_connected_is_true_once_connected_and_false_on_timeout_or_after_a_drop(self):
+        self.assertFalse(self.capture.wait_connected(0.05))
+        self.client.connect()
+        self.assertTrue(self.capture.wait_connected(0.05))
+        self.client.drop()
+        self.assertFalse(self.capture.wait_connected(0.05))
+
     def test_it_never_publishes(self):
         self.client.connect()
         self.client.deliver("evsim/reply", "state C -> B")

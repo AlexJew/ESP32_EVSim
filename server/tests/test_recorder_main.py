@@ -10,9 +10,21 @@ import unittest
 from unittest import mock
 
 from fake_amtron import FakeAmtron
+import time
+
 from fake_mqtt import FakeMqttClient
 from charger_web import config
+from charger_web.service import ChargerService
 from evsim_recorder import __main__ as recorder_main
+from evsim_recorder import experiment as experiment_module
+
+
+class ConnectingClient(FakeMqttClient):
+    """A client whose broker answers as soon as the network loop starts."""
+
+    def loop_start(self):
+        super().loop_start()
+        self.connect()
 
 
 class MainCase(unittest.TestCase):
@@ -23,8 +35,13 @@ class MainCase(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, True)
         self.path = os.path.join(self.dir, "m.sqlite")
-        self.client = FakeMqttClient()
+        self.client = ConnectingClient()
         for patcher in (
+            mock.patch.object(recorder_main, "STABLE_POLLS", 2),
+            mock.patch.object(recorder_main, "SETTLE_PAUSE_S", 0.05),
+            mock.patch.object(recorder_main, "SETTLE_TIMEOUT_S", 3.0),
+            mock.patch.object(recorder_main, "MQTT_WAIT_S", 1.0),
+            mock.patch.object(experiment_module, "RESTORE_PAUSE_S", 0.01),
             mock.patch.object(config, "MODBUS_PORT", self.port),
             mock.patch.dict(os.environ, {"EVSIM_CHARGER_HOST": "127.0.0.1"}),
             mock.patch.object(recorder_main, "build_client", return_value=self.client),
@@ -120,11 +137,84 @@ class RunTest(MainCase):
         self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
         self.assertIs(signal.getsignal(signal.SIGINT), before)
 
-    def test_a_refused_write_is_exit_code_1_and_the_restore_is_attempted(self):
+    def test_a_charger_in_fallback_at_the_start_does_not_make_0_the_limit_to_restore(self):
+        self.fake.fall_back()                                      # the first request reads 0, later ones the real limit
+        code, out, err = self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.writes(), [11, 10])
+        self.assertEqual(self.fake.regs[1000], 10)
+        self.assertIn("10 A", out)
+
+    def test_the_heartbeat_runs_while_the_confirmation_is_waited_for(self):
+        counts = []
+
+        def count():
+            return len([e for e in self.fake.log if e[0] == 3 and e[1] == 1000])
+
+        def slow(prompt):
+            before = count()
+            time.sleep(2.5)
+            counts.append(count() - before)
+            return "y"
+
+        self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", confirm=slow)
+        self.assertGreaterEqual(counts[0], 2)                      # polls kept the charger from falling back
+
+    def test_an_unreadable_limit_refuses_the_run_and_writes_nothing(self):
+        self.fake.refuse_reads = {1000}
+        with mock.patch.object(recorder_main, "SETTLE_TIMEOUT_S", 0.5):
+            code, out, err = self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.writes(), [])
+        self.assertIn("limit", (out + err).lower())
+
+    def test_a_refused_write_is_exit_code_3_because_the_restore_failed_too_and_it_says_so_loudly(self):
         self.fake.refuse_writes = True
         code, out, err = self.run_main("--steps", "11,12", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertEqual(code, 3)
+        self.assertEqual(self.writes()[0], 11)
+        self.assertEqual(set(self.writes()[1:]), {10})
+        self.assertIn("LEFT AT", err)
+        self.assertIn("10 A", err)
+        self.assertNotIn("restored", out)
+
+    def test_a_restore_that_works_after_a_failed_step_says_restored_and_is_exit_code_1(self):
+        self.fake.ignore_writes = True                             # an unconfirmed step: the restore then reads back fine
+        code, out, err = self.run_main("--steps", "11,12", "--dwell", "0.1", "--baseline", "0", "--yes")
         self.assertEqual(code, 1)
-        self.assertEqual(self.writes(), [11, 10])                  # the failed step, then the attempted restore
+        self.assertEqual(self.writes(), [11, 10])
+        self.assertNotIn("LEFT AT", err)
+
+    def test_a_restore_that_fails_after_good_steps_is_exit_code_3(self):
+        fake = self.fake
+
+        class Wrapped(ChargerService):
+            def set_limit(inner, value):
+                result = super().set_limit(value)
+                fake.refuse_writes = True                          # from now on the charger refuses everything
+                return result
+
+        with mock.patch.object(recorder_main, "ChargerService", Wrapped):
+            code, out, err = self.run_main("--steps", "12", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertEqual(code, 3)
+        self.assertEqual(self.fake.regs[1000], 12)
+        self.assertIn("LEFT AT", err)
+
+    def test_sighup_does_the_same_as_ctrl_c(self):
+        timer = threading.Timer(0.8, lambda: os.kill(os.getpid(), signal.SIGHUP))
+        timer.start()
+        self.addCleanup(timer.cancel)
+        self.run_main("--steps", "12", "--dwell", "30", "--baseline", "0", "--yes")
+        self.assertEqual(self.writes(), [12, 10])
+
+    def test_a_broker_that_never_answers_stops_the_run_before_anything_is_written(self):
+        silent = FakeMqttClient()                                  # loop_start never connects
+        with mock.patch.object(recorder_main, "build_client", return_value=silent), \
+                mock.patch.object(recorder_main, "MQTT_WAIT_S", 0.3):
+            code, out, err = self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.writes(), [])
+        self.assertIn("broker", (out + err).lower())
 
 
 class BadPlanTest(MainCase):
@@ -143,7 +233,10 @@ class BadPlanTest(MainCase):
 
     def test_bad_options_are_refused(self):
         for args in (("--dwell", "0"), ("--dwell", "-5"), ("--dwell", "x"), ("--repeat", "0"), ("--baseline", "-1"),
-                     ("--charger-period", "0.5"), ("--charger-period", "11")):
+                     ("--charger-period", "0.5"), ("--charger-period", "11"),
+                     ("--dwell", "nan"), ("--dwell", "inf"), ("--dwell", "1e9"), ("--dwell", "3601"),
+                     ("--baseline", "nan"), ("--baseline", "inf"), ("--baseline", "3601"), ("--repeat", "100000"),
+                     ("--charger-period", "nan"), ("--charger-period", "inf")):
             code, out, err = self.run_main("--steps", "11", "--yes", *args)
             self.assertEqual(code, 2, args)
             self.assertEqual(self.writes(), [], args)

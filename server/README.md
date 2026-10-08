@@ -136,8 +136,12 @@ It prints the plan and asks for confirmation (`--yes` skips the question). Optio
 between charger polls (1 to 10, default 1), `--leave` to keep the last step.
 
 - **Safety:** it writes only register 1000, only 0 or 6 to 16 A and not above the installation limit, and checks the
-  whole list before writing anything. The limit found at the start is written back at the end and on Ctrl-C or
-  SIGTERM (unless `--leave`). A step of 0 A pauses charging. Do not press Apply on the page during a run: the page
+  whole list before writing anything. The limit found at the start is written back at the end and on Ctrl-C, SIGTERM or
+  SIGHUP (unless `--leave`), with up to 5 tries; if it still cannot be written back the command says **CHARGER LEFT AT
+  ... A** on stderr and exits with code 3 (a SIGKILL, a power cut or a crash cannot be restored: the charger then falls back
+  to 0 A after 30 s). The starting limit is read until 4 polls (about 3 s) agree, because the first request after the
+  charger's 30 s fallback reads 0; if it cannot be read reliably, or the MQTT broker cannot be reached, nothing is written.
+  `--dwell` and `--baseline` are limited to 3600 s, `--repeat` to 1000. A step of 0 A pauses charging. Do not press Apply on the page during a run: the page
   re-writes the limit it last applied and would undo the steps.
 - **Time zero** is `limit_writes.t_write_ns`, the computer's clock just before the Modbus write.
 - **Tables:** `sessions`, `messages` (every MQTT message, verbatim, with `t_ns` wall clock and `mono_ns` monotonic),

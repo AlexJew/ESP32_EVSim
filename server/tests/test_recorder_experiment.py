@@ -6,8 +6,11 @@ import threading
 import time
 import unittest
 
+from unittest import mock
+
 from fake_amtron import FakeAmtron
-from charger_web.service import ChargerService
+from charger_web.service import ChargerError, ChargerService
+from evsim_recorder import experiment as experiment_module
 from evsim_recorder.charger_log import ChargerLogger
 from evsim_recorder.experiment import Experiment, PlanError, describe, parse_steps, validate_steps
 from evsim_recorder.storage import Store
@@ -75,6 +78,9 @@ class RigCase(unittest.TestCase):
         self.store.start_session("b", "c", {}, [])
         self.store.start()
         self.addCleanup(self.store.stop)
+        patcher = mock.patch.object(experiment_module, "RESTORE_PAUSE_S", 0.01)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.service = ChargerService("127.0.0.1", self.port, on_poll=ChargerLogger(self.store), period_s=0.05)
         self.addCleanup(self.service.stop)
         self.service.poll_once()
@@ -201,7 +207,8 @@ class ExperimentTest(RigCase):
     def test_a_failed_write_is_restored_even_with_leave(self):
         self.fake.refuse_writes = True
         self.assertFalse(self.experiment([11, 12], leave=True).run())
-        self.assertEqual(self.writes(), [11, 10])
+        self.assertEqual(self.writes()[0], 11)
+        self.assertEqual(set(self.writes()[1:]), {10})                          # the restore, tried again and again
 
     def test_a_stop_during_a_dwell_ends_the_run_and_restores_the_original_limit(self):
         experiment = self.experiment([12, 13, 14], dwell=5)
@@ -242,11 +249,61 @@ class ExperimentTest(RigCase):
         self.assertGreater(len(reads), 5)
         self.assertFalse(self.fake.in_fallback)
 
-    def test_the_original_limit_unreadable_means_no_restore_and_an_event(self):
+    def test_an_unknown_original_limit_refuses_the_run_before_writing_anything(self):
         self.service._values["set_limit_a"] = None
-        self.experiment([12]).run()
+        experiment = self.experiment([12])
+        self.assertFalse(experiment.run())
+        self.assertEqual(self.writes(), [])
+        self.assertIn("refused", [k for (k,) in self.query("SELECT kind FROM recorder_events")])
+
+    def test_an_unknown_original_limit_is_fine_with_leave_because_nothing_is_restored(self):
+        self.service._values["set_limit_a"] = None
+        self.assertTrue(self.experiment([12], leave=True).run())
         self.assertEqual(self.writes(), [12])
-        self.assertIn("restore_skipped", [k for (k,) in self.query("SELECT kind FROM recorder_events")])
+
+    def test_the_original_given_by_the_caller_is_restored_not_a_new_read_of_the_charger(self):
+        self.experiment([12], original=7).run()
+        self.assertEqual(self.writes(), [12, 7])
+
+    def test_a_restore_that_never_works_is_retried_a_bounded_number_of_times_and_reported_as_failed(self):
+        original = self.service.set_limit
+
+        def one_good_write_then_refuse(value):
+            result = original(value)
+            self.fake.refuse_writes = True
+            return result
+
+        self.service.set_limit = one_good_write_then_refuse
+        experiment = self.experiment([12])
+        experiment.run()
+        self.assertIs(experiment.restore_ok, False)
+        errors = [e for (e,) in self.query("SELECT error FROM limit_writes WHERE step = -1")]
+        self.assertEqual(len(errors), experiment_module.RESTORE_ATTEMPTS)
+        self.assertTrue(all(errors))
+        self.assertEqual(self.fake.regs[1000], 12)                               # the charger really was left there
+        self.assertEqual((experiment.original, experiment.last_tried), (10, 12))
+
+    def test_a_restore_that_works_on_the_third_try_is_reported_as_ok(self):
+        original = self.service.set_limit
+        calls = []
+
+        def flaky(value):
+            calls.append(value)
+            if len(calls) in (2, 3):
+                raise ChargerError("busy")
+            return original(value)
+
+        self.service.set_limit = flaky
+        experiment = self.experiment([12])
+        experiment.run()
+        self.assertIs(experiment.restore_ok, True)
+        self.assertEqual(calls, [12, 10, 10, 10])
+        self.assertEqual(self.fake.regs[1000], 10)
+
+    def test_nothing_to_restore_counts_as_ok(self):
+        experiment = self.experiment([12, 10])
+        experiment.run()
+        self.assertIs(experiment.restore_ok, True)
 
 
 if __name__ == "__main__":

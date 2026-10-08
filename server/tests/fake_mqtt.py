@@ -13,7 +13,7 @@ class FakeMqttClient:
         self.publish_rc = 0            # what publish() reports; 4 is paho's "not connected"
         self.publish_hook = None       # called with (topic, payload) while publishing: a test's way to answer at once
         self.calls = []                # ("connect_async", host, port), ("loop_start",), ("disconnect",), ("loop_stop",)
-        self.on_connect = self.on_message = self.on_disconnect = None
+        self.on_connect = self.on_message = self.on_disconnect = self.on_connect_fail = None
 
     def subscribe(self, topic, qos=0):
         self.subscribed.append((topic, qos))
@@ -40,6 +40,9 @@ class FakeMqttClient:
 
     def connect(self, reason=OK):
         self.on_connect(self, None, None, reason, None)
+
+    def fail_to_connect(self):
+        self.on_connect_fail(self, None)
 
     def drop(self):
         self.on_disconnect(self, None, None, None, None)

@@ -109,7 +109,9 @@ The page's service **re-writes the limit last set with Apply** if the charger re
 |---|---|
 | A bad or out-of-range step, or an unreadable plan | Refused at start, nothing written, a clear message. |
 | Confirmation declined | Nothing written. |
-| Charger unreachable at start | The command stops with a message before writing anything. |
+| Charger unreachable at start, or its limit cannot be read reliably | The command stops with a message before writing anything. The limit to restore is the value that 4 consecutive polls (about 3 s) agree on: the first request after the charger's fallback reads 0 although the stored limit is intact. |
+| MQTT broker not reachable before the first write | The command stops with a message, nothing written (otherwise the chain would not be recorded). Drops during a run are events. |
+| The first limit cannot be written back | Up to 5 tries; then `restore_failed` is recorded, `CHARGER LEFT AT ... A` is printed to stderr and the exit code is 3. SIGHUP is handled like SIGINT and SIGTERM. |
 | Charger unreachable mid-run | `charger_error` events and error rows; the run stops after a failed write; the original limit is restored if the charger comes back. |
 | Broker down at start-up or during the run | The recorder starts and keeps retrying; `disconnected` and `connected` events bracket the gap; the step runner and the charger poll carry on. |
 | Slow or full disk | Writes retry with the next batch; after 100 000 queued rows the oldest are dropped and a `dropped` event records how many. Callbacks never block. |

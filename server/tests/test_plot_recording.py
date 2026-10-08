@@ -51,6 +51,17 @@ class CrossingTest(unittest.TestCase):
         self.assertIsNone(pr.level(rows, 10 * S, 20 * S))
 
 
+class DipTest(unittest.TestCase):
+    def test_the_window_stops_at_the_first_reading_far_from_the_first_half(self):
+        rows = [(i * S, v) for i, v in enumerate([100, 100, 100, 100, 100, 100, 100, 700, 100, 100])]
+        self.assertEqual(pr.dip_start(rows, 0, 10 * S), 7 * S)
+
+    def test_a_steady_window_is_not_cut(self):
+        rows = [(i * S, 100 + i % 3) for i in range(10)]
+        self.assertEqual(pr.dip_start(rows, 0, 10 * S), 10 * S)
+        self.assertEqual(pr.dip_start([], 0, 10 * S), 10 * S)
+
+
 class SyntheticRecording(unittest.TestCase):
     """Two writes 20 s apart. The first changes everything with known delays: the board sees it 0.2 s after the write, the
     server publishes it at 1.0 s, the inverter's reading changes at 2.1 s. The second changes the board and the server but not

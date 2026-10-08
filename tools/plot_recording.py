@@ -17,6 +17,8 @@ NS = 1e9
 BASELINE_S = 5          # the level before a write is the median of this many seconds
 SETTLED_S = 10          # the settled level, and the steady-state power, use the last seconds of a step
 MIN_STEP_W = 300        # a hop is only measured when its signal moved by at least this much
+DIP_W = 400             # inside a settled window, an EV setpoint this far from its first half ends the window; the inverter
+                        # follows the setpoint, so its own oscillation when saturated (15-16 A) is kept as jitter
 LARGE_JUMP_A = 3        # a change of at least this many amps is plotted apart from the 1 A steps
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -40,6 +42,16 @@ def crossing_time(rows, start_ns, base, settled):
         if past and (index + 1 == len(beyond) or beyond[index + 1][1]):
             return t
     return None
+
+
+def dip_start(rows, start_ns, end_ns):
+    """Time of the first setpoint reading in [start_ns, end_ns) that is DIP_W or more away from the median of the window's first half,
+    or end_ns when there is none. The steady-state figures of every series stop there, so a dip is not averaged into them."""
+    window = [(t, v) for t, v in rows if start_ns <= t < end_ns and v is not None]
+    reference = level(window, start_ns, start_ns + (end_ns - start_ns) // 2)
+    if reference is None:
+        return end_ns
+    return next((t for t, v in window if abs(v - reference) >= DIP_W), end_ns)
 
 
 def kind_of(from_a, to_a):
@@ -72,10 +84,11 @@ def analyse(path):
     for index, (run, step, t0, from_a, to_a) in enumerate(writes):
         end = writes[index + 1][2] if index + 1 < len(writes) else last_ns + 1
         before, tail = t0 - int(BASELINE_S * NS), end - int(SETTLED_S * NS)
-        powers.append({"run": run, "step": step, "from_a": from_a, "to_a": to_a,
-                       "charger_w": level_mean(charger, tail, end), "dc_w": level_mean(inverter, tail, end),
-                       "ac_w": level_mean(ac, tail, end), "setpoint_w": level_mean(server, tail, end), "charger_sd": level_sd(charger, tail, end),
-                       "dc_sd": level_sd(inverter, tail, end), "ac_sd": level_sd(ac, tail, end)})
+        stop = dip_start(server, tail, end)
+        powers.append({"trimmed": stop < end, "run": run, "step": step, "from_a": from_a, "to_a": to_a,
+                       "charger_w": level_mean(charger, tail, stop), "dc_w": level_mean(inverter, tail, stop),
+                       "ac_w": level_mean(ac, tail, stop), "setpoint_w": level_mean(server, tail, stop), "charger_sd": level_sd(charger, tail, stop),
+                       "dc_sd": level_sd(inverter, tail, stop), "ac_sd": level_sd(ac, tail, stop)})
         times, reason = [], None
         for name, rows in (("board", cp), ("server", server), ("inverter", inverter)):
             window = [(t, v) for t, v in rows if t < end]
@@ -193,7 +206,7 @@ def plot_power(result, out):
     handles, labels = ax.get_legend_handles_labels()
     from matplotlib.lines import Line2D
     handles += [Line2D([], [], color="#2a5fa8", linestyle="--"), Line2D([], [], color="#7b4fa3", linestyle=":")]
-    labels += ["Error: |inverter DC input - EV setpoint| (right axis)", "Jitter: std. deviation of the AC output over the same 10 s (right axis)"]
+    labels += ["Error", "Jitter"]
     ax.legend(handles, labels, loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(out, dpi=150)
@@ -215,6 +228,9 @@ def main(argv=None):
     plot_power(result, stem + "-power.png")
     for h in result["hops"]:
         print("%2d -> %2d A  %-5s  %.2f + %.2f + %.2f = %.2f s" % (h["from_a"], h["to_a"], h["kind"], h["hop1"], h["hop2"], h["hop3"], h["total"]))
+    for p in result["powers"]:
+        if p["trimmed"]:
+            print("%d A: steady-state window cut at a dip of the EV setpoint" % p["to_a"])
     for step, reason in result["skipped"]:
         print("step %d skipped: %s" % (step, reason))
     print("wrote", stem + "-waterfall.png", stem + "-power.png")

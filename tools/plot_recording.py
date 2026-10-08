@@ -178,21 +178,22 @@ def plot_power(result, out):
         if not points:
             continue
         ax.plot([a for a, *_ in points], [w for _, w, *_ in points], label=label, color=color, marker="o", linewidth=2)
-        errors = [(a, w - target) for a, w, _, target in points if target is not None]
-        if errors:
-            right.plot([a for a, _ in errors], [e for _, e in errors], color=color, linestyle="--", linewidth=1.2, alpha=0.8)
-        right.plot([a for a, *_ in points], [j for _, _, j, _ in points], color=color, linestyle=":", linewidth=1.6, alpha=0.9)
+        if key == "dc_w":
+            errors = [(a, abs(w - target)) for a, w, _, target in points if target is not None]
+            right.plot([a for a, _ in errors], [e for _, e in errors], color=color, linestyle="--", linewidth=1.5)
+        if key == "ac_w":
+            right.plot([a for a, *_ in points], [j for _, _, j, _ in points], color=color, linestyle=":", linewidth=1.8)
     ax.set_xlabel("Current limit written to the charger (A)")
     ax.set_ylabel("Power (W), mean of the last %d s of each step" % SETTLED_S)
-    right.set_ylabel("Error (dashed) and jitter (dotted), W")
-    right.axhline(0, color="#999999", linewidth=0.6)
+    right.set_ylabel("DC error (dashed) and AC jitter (dotted), W")
+    right.set_ylim(bottom=0)
     ax.set_xticks(amps)
     ax.set_ylim(bottom=0)
     ax.grid(color="#dce4df")
     handles, labels = ax.get_legend_handles_labels()
     from matplotlib.lines import Line2D
-    handles += [Line2D([], [], color="#555555", linestyle="--"), Line2D([], [], color="#555555", linestyle=":")]
-    labels += ["Error: measurement minus EV setpoint (right axis)", "Jitter: standard deviation over the same 10 s (right axis)"]
+    handles += [Line2D([], [], color="#2a5fa8", linestyle="--"), Line2D([], [], color="#7b4fa3", linestyle=":")]
+    labels += ["Error: |inverter DC input - EV setpoint| (right axis)", "Jitter: std. deviation of the AC output over the same 10 s (right axis)"]
     ax.legend(handles, labels, loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(out, dpi=150)

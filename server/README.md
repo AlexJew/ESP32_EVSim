@@ -141,8 +141,9 @@ between charger polls (1 to 10, default 1), `--leave` to keep the last step.
   ... A** on stderr and exits with code 3 (a SIGKILL, a power cut or a crash cannot be restored: the charger then falls back
   to 0 A after 30 s). The starting limit is read until 4 polls (about 3 s) agree, because the first request after the
   charger's 30 s fallback reads 0; if it cannot be read reliably, or the MQTT broker cannot be reached, nothing is written.
-  `--dwell` and `--baseline` are limited to 3600 s, `--repeat` to 1000. A step of 0 A pauses charging. Do not press Apply on the page during a run: the page
-  re-writes the limit it last applied and would undo the steps.
+  `--dwell` and `--baseline` are limited to 3600 s, `--repeat` to 1000. A step of 0 A pauses charging. **Stop the web page (and any other program polling the AMTRON) before a run:** with a second Modbus client about a
+  third of the recorder's charger polls fail, and the page re-writes the limit it last applied, which would undo the steps.
+  The run warns on stderr if more than 5 % of the charger polls failed.
 - **Time zero** is `limit_writes.t_write_ns`, the computer's clock just before the Modbus write.
 - **Tables:** `sessions`, `messages` (every MQTT message, verbatim, with `t_ns` wall clock and `mono_ns` monotonic),
   `charger` (one row per poll: raw phase currents, voltages, power, signalled current, limits, states), `limit_writes`,
@@ -151,7 +152,8 @@ between charger polls (1 to 10, default 1), `--leave` to keep the last step.
 - **Resolution:** `evsim/cp` is 5 Hz and crosses the WiFi (its arrival time includes a transit time that is not
   known; `board_ms` is the board's own uptime and shows its 200 ms rhythm); `evsim/setpoint` and `evsim/inverter` are
   1 Hz from the setpoint server, with their own times in `tick_ms`, `read_ts_ms` and `cap_ts_ms`; the charger is polled
-  once a second. All times are one computer's clock.
+  with a 1 s pause between polls of about 0.7 s each, so a `charger` row comes about every 1.7 s. All times are one
+  computer's clock.
 
 Example (pandas): the delay from each write to the first `cp` sample whose setpoint moved by more than 50 W, and the
 mean powers over the last 20 s of each step.

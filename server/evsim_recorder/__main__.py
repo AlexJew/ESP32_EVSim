@@ -15,7 +15,7 @@ from charger_web import config as charger_config
 from charger_web.service import ChargerService
 
 from .capture import KEEPALIVE_S, Capture, build_client
-from .charger_log import ChargerLogger
+from .charger_log import ChargerLogger, sharing_warning
 from .experiment import Experiment, PlanError, describe, parse_steps, validate_steps
 from .storage import Store
 
@@ -140,7 +140,8 @@ def main(argv=None, confirm=input):
                 "charger_period_s": args.charger_period, "leave": args.leave}
         store.start_session(f"{args.host}:{args.port}", host, plan, sys.argv if argv is None else ["evsim_recorder", *argv])
         store.start()
-        service = ChargerService(host, period_s=args.charger_period, on_poll=ChargerLogger(store))
+        logger = ChargerLogger(store)
+        service = ChargerService(host, period_s=args.charger_period, on_poll=logger)
         service.poll_once()
         status = service.status()
         if status["status"] != "ok":
@@ -176,6 +177,9 @@ def main(argv=None, confirm=input):
         experiment = Experiment(service, store, args.steps, args.dwell, args.repeat, args.baseline, args.leave, stop,
                                 original=current)
         done = experiment.run()
+        warning = sharing_warning(logger.polls, logger.failed)
+        if warning:
+            print(warning, file=sys.stderr)
         if experiment.restore_ok is False:
             print(f"CHARGER LEFT AT {experiment.last_tried} A (maybe): the limit set at the start was {current} A and "
                   f"could not be written back. Set it back by hand.", file=sys.stderr)

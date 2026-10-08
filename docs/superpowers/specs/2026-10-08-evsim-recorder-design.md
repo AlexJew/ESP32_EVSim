@@ -92,12 +92,14 @@ All times come from one computer's clock, so delays are exact for what is local 
 
 - `evsim/setpoint` and `evsim/inverter` come from the setpoint server on the same computer: arrival is accurate to about a millisecond, and the new `ts_ms`, `read_ts_ms` and `cap_ts_ms` give the server's own times. Their content is sampled: the server averages `evsim/cp` over 1 s and publishes once a second; the inverter writer reads and publishes once a second.
 - `evsim/cp` crosses the WiFi from the board: its arrival time includes a transit time that is not known and varies. The board's uptime (`board_ms`) shows its sampling regularity.
-- The charger's own readings (`charger` table) are one poll every **1 s** (`--charger-period`, 1 to 10 s), each poll of 13 reads a few tens of milliseconds long: the signalled current and the meter resolve the charger's side of a step to about 1 s, the same rhythm as the setpoint and inverter messages. They suit the **steady-state** comparisons (power at each current) well. The AMTRON has not been polled this fast before: the live check watches for errors, and a longer period is the fallback.
+- The charger's own readings (`charger` table) are one poll every **1 s** (`--charger-period`, 1 to 10 s), each poll of 13 reads a few tens of milliseconds long: the signalled current and the meter resolve the charger's side of a step to about 1 s, the same rhythm as the setpoint and inverter messages. They suit the **steady-state** comparisons (power at each current) well. The poll takes about 0.7 s, so with the period added a row comes about every 1.7 s (see "Running with the web page stopped").
 - Time zero (`t_write_ns`) is exact: the same process writes the register and reads the clock.
 
-### Running next to the web page
+### Running with the web page stopped
 
-The page's service **re-writes the limit last set with Apply** if the charger reports a different one, so a recorder run would be undone within seconds if the page had one. The README says: do not press Apply during a run, or restart the page first (a fresh page has no remembered limit and never writes by itself). Both can poll the charger side by side.
+**Stop the web page, and any other program polling the AMTRON, before a run.** Measured on the rig on 2026-10-08: with the page (a second Modbus client) running, about a third of the recorder's charger polls failed ("connection closed by the charger", "connection reset by peer", roughly every 4.5 s), at a 1 s and at a 2 s period alike, while the page itself showed no errors; with the page stopped none of 91 polls failed. The recorder counts its failed polls and ends with a warning on stderr if more than 5 % failed. The page's service also **re-writes the limit last set with Apply** if the charger reports a different one, which would undo a run's steps, so the page must not be used during a run anyway.
+
+**The charger rows come about every 1.7 s, not every second.** A poll is 13 Modbus requests and takes about 0.7 s (the AMTRON answers a request in about 50 ms), and the service waits the poll period after each poll, so the cycle is the duration plus the period. `--charger-period 1` therefore gives a row about every 1.7 s.
 
 ### Files and housekeeping
 

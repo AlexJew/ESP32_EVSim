@@ -11,7 +11,7 @@ from unittest import mock
 from fake_amtron import FakeAmtron
 from charger_web.service import ChargerError, ChargerService
 from evsim_recorder import experiment as experiment_module
-from evsim_recorder.charger_log import ChargerLogger
+from evsim_recorder.charger_log import ChargerLogger, sharing_warning
 from evsim_recorder.experiment import Experiment, PlanError, describe, parse_steps, validate_steps
 from evsim_recorder.storage import Store
 
@@ -121,6 +121,34 @@ class ChargerLoggerTest(RigCase):
             logger(poll)
         events = [e[0] for e in self.query("SELECT kind FROM recorder_events ORDER BY id")]
         self.assertEqual(events, ["charger_error", "charger_ok", "charger_error", "charger_ok"])
+
+
+class SharingWarningTest(unittest.TestCase):
+    """Seen live on 2026-10-08: with a second Modbus client (the web page) polling the AMTRON, about a third of the
+    recorder's polls failed; with the page stopped, none did."""
+
+    def test_a_clean_run_has_no_warning(self):
+        self.assertIsNone(sharing_warning(150, 0))
+        self.assertIsNone(sharing_warning(150, 7))                  # 4.7 %: noise
+
+    def test_a_run_with_many_failed_polls_says_what_probably_happened_and_what_to_do(self):
+        text = sharing_warning(99, 32)
+        for needle in ("32 of 99", "32 %", "web page", "stop", "MQTT"):
+            self.assertIn(needle, text)
+
+    def test_too_few_polls_to_judge_gives_no_warning(self):
+        self.assertIsNone(sharing_warning(5, 5))
+        self.assertIsNone(sharing_warning(0, 0))
+
+
+class ChargerLoggerCountTest(RigCase):
+    def test_the_logger_counts_polls_and_failures(self):
+        logger = ChargerLogger(self.store)
+        ok = {"t_start_ns": 1, "t_end_ns": 2, "values": {}, "error": None}
+        bad = {"t_start_ns": 3, "t_end_ns": 4, "values": {}, "error": "reset"}
+        for poll in (ok, bad, ok, bad, bad):
+            logger(poll)
+        self.assertEqual((logger.polls, logger.failed), (5, 3))
 
 
 class ExperimentTest(RigCase):

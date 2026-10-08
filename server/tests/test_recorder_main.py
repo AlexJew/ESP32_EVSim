@@ -84,6 +84,25 @@ class RunTest(MainCase):
         self.assertIn('"steps": [11, 12]', session[2])
         self.assertIsNotNone(session[3])
 
+    def test_a_clean_run_prints_no_sharing_warning(self):
+        code, out, err = self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertNotIn("WARNING", err)
+
+    def test_a_run_whose_charger_polls_mostly_failed_ends_with_the_warning_on_stderr(self):
+        from evsim_recorder.charger_log import ChargerLogger as Real
+
+        class Failing(Real):
+            def __call__(self, poll):
+                super().__call__(poll)
+                self.polls += 40                                   # as if many polls had been made and failed
+                self.failed += 20
+
+        with mock.patch.object(recorder_main, "ChargerLogger", Failing):
+            code, out, err = self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING", err)
+        self.assertIn("stop", err)
+
     def test_the_mqtt_client_is_connected_for_the_run_and_closed_after_it_in_order(self):
         self.run_main("--steps", "11", "--dwell", "0.1", "--baseline", "0", "--yes")
         self.assertEqual([c[0] for c in self.client.calls], ["connect_async", "loop_start", "disconnect", "loop_stop"])

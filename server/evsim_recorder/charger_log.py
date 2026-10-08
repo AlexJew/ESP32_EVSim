@@ -17,12 +17,33 @@ COLUMNS = {                        # charger table column <- register name
 }
 
 
+MIN_POLLS_TO_JUDGE = 10
+WARN_ABOVE = 0.05                  # more than this share of failed polls is not noise
+
+
+def sharing_warning(polls, failed):
+    """A warning for the end of a run if many charger polls failed, else None.
+
+    Measured on 2026-10-08: with a second Modbus client (the web page) polling the AMTRON, about a third of the
+    recorder's polls failed ("connection closed by the charger"), at 1 s and at 2 s alike; with the page stopped none did.
+    """
+    if polls < MIN_POLLS_TO_JUDGE or failed / polls <= WARN_ABOVE:
+        return None
+    return (f"WARNING: {failed} of {polls} charger polls failed ({100 * failed // polls} %). The AMTRON drops the connection "
+            "when another Modbus client (the web page, a tool) is polling it too: stop that client and run again for complete "
+            "charger data. The MQTT and inverter data are not affected.")
+
+
 class ChargerLogger:
     def __init__(self, store):
         self._store = store
         self._failing = False
+        self.polls = 0                  # how many polls were logged, and how many of them failed
+        self.failed = 0
 
     def __call__(self, poll):
+        self.polls += 1
+        self.failed += poll["error"] is not None
         values = poll["values"]
         self._store.add_charger(
             t_start_ns=poll["t_start_ns"], t_end_ns=poll["t_end_ns"], error=poll["error"],

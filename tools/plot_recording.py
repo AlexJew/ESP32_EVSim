@@ -198,7 +198,6 @@ def plot_waterfall_vertical(result, out):
         ax.set_xticklabels(names, fontsize=8)
         ax.set_ylim(0, (reach + sd) * 1.12)
         ax.set_ylabel("Time since the limit was written (s)")
-        ax.set_title("1 A steps", fontsize=10, loc="left")
         ax.grid(axis="y", color="#dce4df")
         ax.set_axisbelow(True)
     fig.tight_layout()

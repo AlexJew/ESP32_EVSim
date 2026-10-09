@@ -193,7 +193,7 @@ def plot_waterfall_vertical(result, out):
         ax.bar(len(HOPS), bottom, color="#444444", width=0.6)
         ax.errorbar(len(HOPS), bottom, yerr=sd, color="black", capsize=4, linewidth=1)
         ax.text(len(HOPS), bottom + sd + 0.08, "%.2f s" % bottom, ha="center", va="bottom", fontsize=9, fontweight="bold")
-        names.append("Total\n(n = %d)" % len(hops))
+        names.append("Total")
         ax.set_xticks(range(len(names)))
         ax.set_xticklabels(names, fontsize=8)
         ax.set_ylim(0, (reach + sd) * 1.12)

@@ -170,7 +170,7 @@ def plot_waterfall(result, out):
 
 
 def plot_waterfall_vertical(result, out):
-    """The 1 A steps as a thin vertical waterfall: time runs down, one floating bar per hop, then the total."""
+    """The 1 A steps as a thin vertical waterfall: time runs up, one floating bar per hop, then the total."""
     plt = _pyplot()
     hops = [h for h in result["hops"] if h["kind"] == "small"]
     fig, ax = plt.subplots(figsize=(3.4, 6.5))
@@ -184,7 +184,7 @@ def plot_waterfall_vertical(result, out):
             sd = statistics.pstdev(values) if len(values) > 1 else 0.0
             ax.bar(column, mean, bottom=bottom, color=color, width=0.6)
             ax.errorbar(column, bottom + mean, yerr=sd, color="black", capsize=4, linewidth=1)
-            ax.text(column, bottom + mean + sd + 0.08, "%.2f s" % mean, ha="center", va="top", fontsize=9)
+            ax.text(column, bottom + mean + sd + 0.08, "%.2f s" % mean, ha="center", va="bottom", fontsize=9)
             names.append(label.replace(" → ", "\n→ "))
             bottom += mean
             reach = max(reach, bottom + sd)
@@ -192,12 +192,11 @@ def plot_waterfall_vertical(result, out):
         sd = statistics.pstdev(totals) if len(totals) > 1 else 0.0
         ax.bar(len(HOPS), bottom, color="#444444", width=0.6)
         ax.errorbar(len(HOPS), bottom, yerr=sd, color="black", capsize=4, linewidth=1)
-        ax.text(len(HOPS), bottom + sd + 0.08, "%.2f s" % bottom, ha="center", va="top", fontsize=9, fontweight="bold")
+        ax.text(len(HOPS), bottom + sd + 0.08, "%.2f s" % bottom, ha="center", va="bottom", fontsize=9, fontweight="bold")
         names.append("Total\n(n = %d)" % len(hops))
         ax.set_xticks(range(len(names)))
         ax.set_xticklabels(names, fontsize=8)
         ax.set_ylim(0, (reach + sd) * 1.12)
-        ax.invert_yaxis()
         ax.set_ylabel("Time since the limit was written (s)")
         ax.set_title("1 A steps", fontsize=10, loc="left")
         ax.grid(axis="y", color="#dce4df")

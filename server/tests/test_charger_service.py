@@ -11,7 +11,7 @@ from fake_amtron import FakeAmtron
 from charger_web import config
 from charger_web.modbus import ModbusTransportError
 from charger_web.registers import load_map
-from charger_web.service import ChargerError, ChargerService, LimitValidationError
+from charger_web.service import READ_ORDER, ChargerError, ChargerService, LimitValidationError
 
 
 class FakeClock:
@@ -366,6 +366,118 @@ class RestoreTest(ServiceTest):
         self.fake.ignore_signal_updates = True           # the real unit takes about 3 s to follow
         self.service.set_limit(10)
         self.assertFalse(self.service.status()["paused"])
+
+
+class CadenceTest(unittest.TestCase):
+    """The poll period is the time from the start of one poll to the start of the next. Measured on the rig on 2026-10-08:
+    a poll of 13 requests takes 0.7 s, so waiting the period after each poll made a "1 s" poll come every 1.7 s."""
+
+    def setUp(self):
+        self.fake = FakeAmtron()
+        self.port = self.fake.start()
+        self.addCleanup(self.fake.stop)
+        self.polls = []
+
+    def run_for(self, seconds, period):
+        service = ChargerService("127.0.0.1", self.port, period_s=period, on_poll=self.polls.append)
+        self.addCleanup(service.stop)
+        service.start()
+        time.sleep(seconds)
+        service.stop()
+        starts = [p["t_start_ns"] / 1e9 for p in self.polls]
+        ends = [p["t_end_ns"] / 1e9 for p in self.polls]
+        return starts, ends
+
+    def test_polls_start_every_period_even_though_a_poll_takes_a_good_part_of_it(self):
+        self.fake.delay_s = 0.01                                   # 13 requests: about 0.13 s a poll
+        starts, ends = self.run_for(2.2, 0.4)
+        gaps = [b - a for a, b in zip(starts, starts[1:])]
+        self.assertGreaterEqual(len(starts), 5)
+        for gap in gaps:
+            self.assertAlmostEqual(gap, 0.4, delta=0.08)           # not 0.53, which is poll plus period
+
+    def test_the_default_period_is_one_second(self):
+        self.assertEqual(config.POLL_PERIOD_S, 1)
+
+    def test_a_poll_longer_than_the_period_is_followed_after_a_short_idle_not_in_a_burst(self):
+        self.fake.delay_s = 0.05                                   # about 0.65 s a poll
+        starts, ends = self.run_for(3.0, 0.2)
+        idle = [start - end for end, start in zip(ends, starts[1:])]
+        self.assertGreaterEqual(len(starts), 3)
+        for pause in idle:
+            self.assertGreaterEqual(pause, 0.08)                   # the charger always gets a moment of quiet
+            self.assertLess(pause, 0.3)                            # but the next poll is not delayed by a whole period
+
+    def test_stop_ends_the_wait_between_polls_at_once(self):
+        service = ChargerService("127.0.0.1", self.port, period_s=10, on_poll=self.polls.append)
+        service.start()
+        time.sleep(0.3)
+        started = time.monotonic()
+        service.stop()
+        self.assertLess(time.monotonic() - started, 2)
+
+
+class PollReportTest(unittest.TestCase):
+    def setUp(self):
+        self.fake = FakeAmtron()
+        self.port = self.fake.start()
+        self.addCleanup(self.fake.stop)
+        self.reports = []
+
+    def service(self, on_poll):
+        service = ChargerService("127.0.0.1", self.port, on_poll=on_poll)
+        self.addCleanup(service.stop)
+        return service
+
+    def test_each_poll_is_reported_with_its_times_and_every_raw_value(self):
+        service = self.service(self.reports.append)
+        before = time.time_ns()
+        service.poll_once()
+        after = time.time_ns()
+        report = self.reports[0]
+        self.assertTrue(before <= report["t_start_ns"] <= report["t_end_ns"] <= after)
+        self.assertIsNone(report["error"])
+        values = report["values"]
+        self.assertEqual(set(values), set(READ_ORDER))
+        self.assertEqual((values["set_limit_a"], values["signalled_current_a"], values["meter_power_w"]), (10, 10, 600))
+        self.assertEqual((values["meter_current_l1_a"], values["meter_voltage_l3_v"]), (0.874, 233))
+
+    def test_a_failed_poll_is_reported_with_the_error_and_the_values_it_did_not_reach_are_none(self):
+        service = self.service(self.reports.append)
+        service.poll_once()
+        self.fake.stop()
+        service.poll_once()
+        report = self.reports[-1]
+        self.assertTrue(report["error"])
+        self.assertIsNone(report["values"]["meter_power_w"])
+        self.assertEqual(set(report["values"]), set(READ_ORDER))
+
+    def test_a_callback_that_raises_never_breaks_the_poll(self):
+        def broken(report):
+            raise RuntimeError("boom")
+        service = self.service(broken)
+        service.poll_once()
+        self.assertEqual(service.status()["set_limit_a"]["value"], 10)
+
+    def test_without_a_callback_nothing_changes(self):
+        service = self.service(None)
+        service.poll_once()
+        self.assertEqual(service.status()["link"], "ok")
+
+
+class WriteTimesTest(ServiceTest):
+    def test_set_limit_returns_the_wall_clock_just_before_and_after_the_write(self):
+        self.service.poll_once()
+        before = time.time_ns()
+        result = self.service.set_limit(12)
+        after = time.time_ns()
+        self.assertTrue(before <= result["write_sent_ns"] <= result["write_acked_ns"] <= after)
+        self.assertEqual((result["success"], result["set_limit_a"]), (True, 12))
+
+    def test_the_existing_keys_are_still_there(self):
+        self.service.poll_once()
+        result = self.service.set_limit(12)
+        self.assertTrue({"success", "set_limit_a", "updated_at"} <= set(result))
 
 
 class SignalledAfterApplyTest(ServiceTest):

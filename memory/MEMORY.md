@@ -15,3 +15,4 @@
 - [Amps to watts](evsim-amps-to-watts.md) — decided, not implemented: DC target = 1.2247 x offered amps x measured V_dc (about 630 W/A), not amps x 690 V.
 - [AMTRON Modbus](evsim-amtron-modbus.md) — register map, the 30 s fallback to 0 A and the limit restored on the next request; the charger page uses it.
 - [EVSim dashboard](evsim-dashboard.md) — the page also shows inverter DC power, evsim/cp, the setpoint and the DC target with a 10-minute chart; read-only.
+- [EVSim recorder](evsim-recorder.md) — `python -m evsim_recorder run` steps the AMTRON limit and records charger, board, setpoint and inverter to SQLite for delay and power characterization.

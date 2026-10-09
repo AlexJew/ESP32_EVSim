@@ -44,7 +44,7 @@ Open `http://127.0.0.1:8080/`. `EVSIM_CHARGER_HOST` overrides the charger addres
 
 How it works, and what to know:
 
-- A background poller reads the charger every 2 s. That is also the heartbeat the charger needs: after 30 s without
+- A background poller reads the charger once a second (a poll starts every second, a poll of 13 requests takes about 0.7 s). That is also the heartbeat the charger needs: after 30 s without
   Modbus traffic it drops to 0 A, so if this process stops, charging stops within 30 s.
 - "Maximum current" writes register 1000 (0 A pauses; otherwise 6 to 16 A). The AMTRON's own operator limit
   (register 134, set on its page) is a ceiling: the effective limit is the lower of the two.
@@ -119,3 +119,55 @@ measured DC and AC power once a second on `evsim/inverter`.
   `unreachable`. Design: `docs/superpowers/specs/2026-09-30-inverter-writer-design.md`.
 
 Read or cap the inverter by hand with `tools/fronius_modbus.py` (`--help`).
+
+## The recorder: step the limit and log the chain
+
+`evsim_recorder` runs a characterization experiment: it steps the AMTRON's maximum current through a list of values and
+records, with one clock and into one SQLite file, the charger's own measurements, every MQTT message of the chain
+(`evsim/#`: the board's raw samples, the setpoint, the inverter) and each limit write. It is for measuring how long a
+change of the limit takes to reach each hop, and the power at each current.
+
+    cd server
+    .venv/bin/python -m evsim_recorder run --steps 6,7,6,12,16,6 --dwell 60
+
+It prints the plan and asks for confirmation (`--yes` skips the question). Options: `--dwell` seconds per step (60),
+`--repeat` runs of the list (1), `--baseline` seconds recorded before the first write (10), `--db PATH` (default
+`data/recordings/evsim-<UTC time>.sqlite`, git-ignored), `--host`/`--port` for the broker, `--charger-period` seconds
+between the starts of two charger polls (1 to 10, default 1), `--leave` to keep the last step.
+
+- **Safety:** it writes only register 1000, only 0 or 6 to 16 A and not above the installation limit, and checks the
+  whole list before writing anything. The limit found at the start is written back at the end and on Ctrl-C, SIGTERM or
+  SIGHUP (unless `--leave`), with up to 5 tries; if it still cannot be written back the command says **CHARGER LEFT AT
+  ... A** on stderr and exits with code 3 (a SIGKILL, a power cut or a crash cannot be restored: the charger then falls back
+  to 0 A after 30 s). The starting limit is read until 4 polls (about 3 s) agree, because the first request after the
+  charger's 30 s fallback reads 0; if it cannot be read reliably, or the MQTT broker cannot be reached, nothing is written.
+  `--dwell` and `--baseline` are limited to 3600 s, `--repeat` to 1000. A step of 0 A pauses charging. **Stop the web page (and any other program polling the AMTRON) before a run:** with a second Modbus client about a
+  third of the recorder's charger polls fail, and the page re-writes the limit it last applied, which would undo the steps.
+  The run warns on stderr if more than 5 % of the charger polls failed.
+- **Time zero** is `limit_writes.t_write_ns`, the computer's clock just before the Modbus write.
+- **Tables:** `sessions`, `messages` (every MQTT message, verbatim, with `t_ns` wall clock and `mono_ns` monotonic),
+  `charger` (one row per poll: raw phase currents, voltages, power, signalled current, limits, states), `limit_writes`,
+  `recorder_events` (broker disconnects, charger errors and recoveries, dropped rows: a gap in the data is not a quiet
+  system). **Views:** `cp`, `setpoint`, `inverter` (typed columns; `NULL` for anything unreadable).
+- **Resolution:** `evsim/cp` is 5 Hz and crosses the WiFi (its arrival time includes a transit time that is not
+  known; `board_ms` is the board's own uptime and shows its 200 ms rhythm); `evsim/setpoint` and `evsim/inverter` are
+  1 Hz from the setpoint server, with their own times in `tick_ms`, `read_ts_ms` and `cap_ts_ms`; the charger is polled
+  with a poll starting every second (each takes about 0.7 s), so a `charger` row comes every second. All times are one
+  computer's clock.
+
+Example (pandas): the delay from each write to the first `cp` sample whose setpoint moved by more than 50 W, and the
+mean powers over the last 20 s of each step.
+
+```python
+import sqlite3, pandas as pd
+db = sqlite3.connect("data/recordings/evsim-XXXX.sqlite")
+writes = pd.read_sql("SELECT * FROM limit_writes WHERE step >= 0", db)
+cp = pd.read_sql("SELECT t_ns, setpoint_w FROM cp ORDER BY t_ns", db)
+for w in writes.itertuples():
+    before = cp[cp.t_ns < w.t_write_ns].setpoint_w.tail(5).median()
+    after = cp[(cp.t_ns >= w.t_write_ns) & ((cp.setpoint_w - before).abs() > 50)]
+    delay = (after.t_ns.iloc[0] - w.t_write_ns) / 1e9 if len(after) else None
+    print(w.label, "first cp change after", delay, "s")
+```
+
+Design: `docs/superpowers/specs/2026-10-08-evsim-recorder-design.md`.

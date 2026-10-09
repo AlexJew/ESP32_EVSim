@@ -55,6 +55,7 @@ def format_setpoint(count, mean, window_s, now_utc):
         "window_s": window_s,
         "status": status,
         "ts": now_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ts_ms": int(now_utc.timestamp() * 1000),       # the same instant in epoch milliseconds
     })
 
 

@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from fake_inverter import FakeInverter, M103, M123
@@ -52,7 +52,7 @@ class WriterTest(unittest.TestCase):
         self.assertEqual((s["dc_w"], s["ac_w"], s["inverter_state"], s["error"]), (7272, 7047, 4, None))
         self.assertEqual((s["dc_a"], s["dc_v"], s["ac_a"], s["ac_v"]), (14.1, 515.0, 6.0, 233.3))
         self.assertEqual(list(s), ["mode", "target_dc_w", "cap_ac_w", "dc_w", "dc_a", "dc_v", "ac_w", "ac_a", "ac_v",
-                                   "inverter_state", "error", "ts"])
+                                   "inverter_state", "error", "ts", "read_ts_ms", "cap_ts_ms"])
         self.assertEqual(s["ts"], "2026-09-30T13:42:07Z")
 
     def test_starting_with_no_data_asserts_a_zero_cap(self):
@@ -108,6 +108,47 @@ class WriterTest(unittest.TestCase):
         self.writer.step_once()
         self.assertEqual(fake2.writes, [(PCT, 3233), (ENA, 1)])
         self.assertEqual(self.last()["mode"], "capped")
+
+    def test_the_message_carries_the_read_time_and_the_time_of_the_last_cap_write(self):
+        base = int(NOW.timestamp() * 1000)
+        now = [NOW]
+        writer = InverterWriter("127.0.0.1", self.port, timeout_s=1, publish=self.status.append, clock=self.clock,
+                                utcnow=lambda: now[0])
+        self.addCleanup(writer.stop)
+        writer.step_once()                                          # no target yet: a first, zero cap is written
+        first = json.loads(self.status[-1])
+        self.assertEqual((first["read_ts_ms"], first["cap_ts_ms"]), (base, base))
+        now[0] = NOW + timedelta(seconds=2)
+        self.clock.t += 2
+        writer.set_target(4000.0)
+        writer.step_once()                                          # the target moved: the cap is written again
+        second = json.loads(self.status[-1])
+        self.assertEqual((second["read_ts_ms"], second["cap_ts_ms"]), (base + 2000, base + 2000))
+        now[0] = NOW + timedelta(seconds=3)
+        self.clock.t += 1
+        writer.set_target(4000.0)
+        writer.step_once()                                          # nothing to write: only the read time moves
+        third = json.loads(self.status[-1])
+        self.assertEqual((third["read_ts_ms"], third["cap_ts_ms"]), (base + 3000, base + 2000))
+
+    def test_before_any_read_or_cap_write_both_times_are_null(self):
+        self.fake.stop()                                            # the inverter is unreachable from the start
+        self.writer.step_once()
+        s = self.last()
+        self.assertEqual(s["mode"], "unreachable")
+        self.assertEqual((s["read_ts_ms"], s["cap_ts_ms"]), (None, None))
+
+    def test_an_unreachable_inverter_after_a_cap_write_keeps_the_cap_time_and_has_no_read_time(self):
+        self.writer.set_target(4000.0)
+        self.writer.step_once()
+        cap_ts = self.last()["cap_ts_ms"]
+        self.assertIsNotNone(cap_ts)
+        self.fake.stop()
+        self.clock.t += 1
+        self.writer.set_target(4000.0)
+        self.writer.step_once()
+        s = self.last()
+        self.assertEqual((s["mode"], s["read_ts_ms"], s["cap_ts_ms"]), ("unreachable", None, cap_ts))
 
     def test_an_unreachable_inverter_reports_null_measurements(self):
         self.writer.set_target(4000.0)

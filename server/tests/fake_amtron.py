@@ -10,6 +10,7 @@ import socket
 import socketserver
 import struct
 import threading
+import time
 
 DEFAULTS = {
     1000: 10,                 # HEMS_CURRENT_LIMIT
@@ -53,6 +54,7 @@ class FakeAmtron:
         self.refuse_writes = False    # answer every write with Modbus exception 3
         self.refuse_reads = set()     # addresses answered with exception 2
         self.ignore_writes = False    # echo a write but keep the old value
+        self.delay_s = 0                      # a delay before every answer: the real unit takes about 55 ms per request
         self.ignore_signal_updates = False   # 706 does not follow a write at once (the real unit takes ~3 s)
         self.in_fallback = False
         self._stored = None
@@ -96,6 +98,8 @@ class FakeAmtron:
         self.in_fallback = False
 
     def respond(self, fc, addr, arg, body):
+        if self.delay_s:
+            time.sleep(self.delay_s)
         self.log.append((fc, addr, arg))
         restore_after = self.in_fallback
         try:

@@ -152,7 +152,7 @@ class SyntheticRecording(unittest.TestCase):
 class PlotTest(SyntheticRecording):
     def test_both_figures_are_written(self):
         result = pr.analyse(self.path)
-        for function, name in ((pr.plot_waterfall, "w.png"), (pr.plot_power, "p.png")):
+        for function, name in ((pr.plot_waterfall, "w.png"), (pr.plot_waterfall_vertical, "v.png"), (pr.plot_power, "p.png")):
             out = os.path.join(self.dir, name)
             function(result, out)
             self.assertGreater(os.path.getsize(out), 5000)

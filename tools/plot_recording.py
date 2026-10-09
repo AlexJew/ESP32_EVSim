@@ -169,6 +169,44 @@ def plot_waterfall(result, out):
     plt.close(fig)
 
 
+def plot_waterfall_vertical(result, out):
+    """The 1 A steps as a thin vertical waterfall: time runs down, one floating bar per hop, then the total."""
+    plt = _pyplot()
+    hops = [h for h in result["hops"] if h["kind"] == "small"]
+    fig, ax = plt.subplots(figsize=(3.4, 6.5))
+    if not hops:
+        ax.text(0.5, 0.5, "No 1 A step was measurable", ha="center", transform=ax.transAxes)
+    else:
+        bottom, reach, names = 0.0, 0.0, []
+        for column, (key, label, color) in enumerate(HOPS):
+            values = [h[key] for h in hops]
+            mean = statistics.fmean(values)
+            sd = statistics.pstdev(values) if len(values) > 1 else 0.0
+            ax.bar(column, mean, bottom=bottom, color=color, width=0.6)
+            ax.errorbar(column, bottom + mean, yerr=sd, color="black", capsize=4, linewidth=1)
+            ax.text(column, bottom + mean + sd + 0.08, "%.2f s" % mean, ha="center", va="top", fontsize=9)
+            names.append(label.replace(" → ", "\n→ "))
+            bottom += mean
+            reach = max(reach, bottom + sd)
+        totals = [h["total"] for h in hops]
+        sd = statistics.pstdev(totals) if len(totals) > 1 else 0.0
+        ax.bar(len(HOPS), bottom, color="#444444", width=0.6)
+        ax.errorbar(len(HOPS), bottom, yerr=sd, color="black", capsize=4, linewidth=1)
+        ax.text(len(HOPS), bottom + sd + 0.08, "%.2f s" % bottom, ha="center", va="top", fontsize=9, fontweight="bold")
+        names.append("Total\n(n = %d)" % len(hops))
+        ax.set_xticks(range(len(names)))
+        ax.set_xticklabels(names, fontsize=8)
+        ax.set_ylim(0, (reach + sd) * 1.12)
+        ax.invert_yaxis()
+        ax.set_ylabel("Time since the limit was written (s)")
+        ax.set_title("1 A steps", fontsize=10, loc="left")
+        ax.grid(axis="y", color="#dce4df")
+        ax.set_axisbelow(True)
+    fig.tight_layout()
+    fig.savefig(out, dpi=200)
+    plt.close(fig)
+
+
 def plot_power(result, out):
     plt = _pyplot()
     by_amp = {}
@@ -225,6 +263,7 @@ def main(argv=None):
     os.makedirs(args.out, exist_ok=True)
     stem = os.path.join(args.out, os.path.splitext(os.path.basename(path))[0])
     plot_waterfall(result, stem + "-waterfall.png")
+    plot_waterfall_vertical(result, stem + "-waterfall-vertical.png")
     plot_power(result, stem + "-power.png")
     for h in result["hops"]:
         print("%2d -> %2d A  %-5s  %.2f + %.2f + %.2f = %.2f s" % (h["from_a"], h["to_a"], h["kind"], h["hop1"], h["hop2"], h["hop3"], h["total"]))

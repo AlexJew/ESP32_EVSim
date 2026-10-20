@@ -12,7 +12,6 @@ tools/*.csv
 tools/__pycache__/
 
 # Setpoint server (Python)
-server/.venv/
 server/**/__pycache__/
 # Recordings of the evsim_recorder (SQLite and its WAL files)
 data/recordings/
